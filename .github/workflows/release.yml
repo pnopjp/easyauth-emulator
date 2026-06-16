@@ -1,0 +1,243 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Build Python binary + package VSIX for each platform
+  # ─────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-amd64
+            vscode_target: win32-x64
+          - os: macos-latest
+            platform: darwin-arm64
+            vscode_target: darwin-arm64
+          - os: ubuntu-latest
+            platform: linux-amd64
+            vscode_target: linux-x64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # ── Python binary ──────────────────────────────────────────────────
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build binary
+        run: python scripts/package.py
+
+      - name: Upload binary archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.platform }}
+          path: dist/easyauth-emulator-${{ matrix.platform }}.*
+          retention-days: 3
+
+      # ── VS Code extension (VSIX) ───────────────────────────────────────
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install npm dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Compile TypeScript
+        working-directory: vscode-extension
+        run: npm run compile
+
+      - name: Set extension version from tag
+        working-directory: vscode-extension
+        shell: bash
+        run: npm version ${GITHUB_REF_NAME#v} --no-git-tag-version
+
+      - name: Package VSIX
+        working-directory: vscode-extension
+        shell: bash
+        run: |
+          mkdir -p bin
+          rm -rf bin/easyauth-emulator
+          cp -r ../dist/easyauth-emulator bin/easyauth-emulator
+          cp ../LICENSE LICENSE
+          npx vsce package --target ${{ matrix.vscode_target }}
+          rm LICENSE
+          rm -rf bin/easyauth-emulator
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v7
+        with:
+          name: vsix-${{ matrix.vscode_target }}
+          path: vscode-extension/*.vsix
+          retention-days: 3
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Unit tests — Python + TypeScript (platform-independent)
+  # ─────────────────────────────────────────────────────────────────────────
+  test-unit:
+    name: Unit tests
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Python unit tests
+        run: python -m pytest tests/python/ -v
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install npm dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: TypeScript unit tests
+        working-directory: vscode-extension
+        run: npm test
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Smoke test — verify each platform binary starts cleanly
+  # ─────────────────────────────────────────────────────────────────────────
+  test-smoke:
+    name: Smoke test (${{ matrix.platform }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-amd64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: ubuntu-latest
+            platform: linux-amd64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: binary-${{ matrix.platform }}
+          path: dist/
+
+      - name: Extract binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Expand-Archive -Path "dist/easyauth-emulator-${{ matrix.platform }}.zip" -DestinationPath "dist/"
+
+      - name: Extract binary (Unix)
+        if: runner.os != 'Windows'
+        run: tar xzf dist/easyauth-emulator-${{ matrix.platform }}.tar.gz -C dist/
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            dist/easyauth-emulator/easyauth-emulator.exe --help
+          else
+            chmod +x dist/easyauth-emulator/easyauth-emulator
+            dist/easyauth-emulator/easyauth-emulator --help
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Publish — GitHub Release + VS Code Marketplace
+  #
+  # Manual approval gate:
+  #   This job uses the "production" environment.
+  #   Add yourself as a Required reviewer in:
+  #     GitHub repo → Settings → Environments → production → Required reviewers
+  #   The job will pause here until you approve after manual testing.
+  #
+  # VS Code Marketplace (Entra ID / OIDC — no long-lived secrets):
+  #   Enabled when repository variable AZURE_CLIENT_ID is set.
+  #   Without it the Marketplace step is skipped and only the GitHub Release
+  #   is created.
+  #
+  #   One-time setup:
+  #   1. Entra ID — App registration
+  #      az ad app create --display-name "easyauth-emulator-publisher"
+  #      az ad sp create --id <appId>
+  #
+  #   2. Federated credential (trusts this workflow on release tags)
+  #      az ad app federated-credential create \
+  #        --id <appId> \
+  #        --parameters '{
+  #          "name": "github-release",
+  #          "issuer": "https://token.actions.githubusercontent.com",
+  #          "subject": "repo:<owner>/<repo>:environment:production",
+  #          "audiences": ["api://AzureADTokenExchange"]
+  #        }'
+  #
+  #   3. Azure DevOps — grant publisher access to the service principal
+  #      dev.azure.com/<org> → Organization settings → Users
+  #      → Add user (use the service principal's object ID or client ID)
+  #      → Assign "Basic" access level, then grant Marketplace: Manage
+  #
+  #   4. GitHub — repository variables (Settings → Variables → Actions)
+  #      AZURE_CLIENT_ID  = <appId>
+  #      AZURE_TENANT_ID  = <tenantId>
+  # ─────────────────────────────────────────────────────────────────────────
+  publish:
+    name: Publish
+    needs: [test-unit, test-smoke]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write   # required for OIDC token issuance
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/binary-windows-amd64/*
+            artifacts/binary-darwin-arm64/*
+            artifacts/binary-linux-amd64/*
+            artifacts/vsix-win32-x64/*
+            artifacts/vsix-darwin-arm64/*
+            artifacts/vsix-linux-x64/*
+
+      - name: Sign in to Azure (OIDC)
+        if: ${{ vars.AZURE_CLIENT_ID != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Publish to VS Code Marketplace
+        if: ${{ vars.AZURE_CLIENT_ID != '' }}
+        run: |
+          npm install -g @vscode/vsce
+          for vsix in artifacts/vsix-*/*.vsix; do
+            echo "Publishing $vsix ..."
+            vsce publish --packagePath "$vsix" --azure-credential
+          done

@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "npm: watch - vscode-extension",
+      "type": "npm",
+      "script": "watch",
+      "path": "vscode-extension/",
+      "problemMatcher": "$tsc-watch",
+      "isBackground": true,
+      "presentation": {
+        "reveal": "never"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "pyinstaller: build",
+      "type": "shell",
+      "command": "pyinstaller easyauth-emulator.spec --distpath vscode-extension/bin --noconfirm",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "build: extension with binary",
+      "type": "shell",
+      "command": "pyinstaller easyauth-emulator.spec --distpath vscode-extension/bin --noconfirm && npm --prefix vscode-extension run compile",
+      "presentation": {
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated"
+      },
+      "problemMatcher": "$tsc"
+    }
+  ]
+}

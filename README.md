@@ -1,0 +1,185 @@
+# EasyAuth Emulator
+
+Easy Auth Emulator is an authentication gateway that replaces Azure App Service / Azure Functions / Azure Container Apps authentication for local and development environments. It emulates Authentication and Authorization ("Easy Auth-like") behavior, including multi-provider authentication, Easy Auth-compatible headers, and related endpoints.
+
+## Why?
+
+Azure App Service, Azure Functions, and Azure Container Apps' built-in authentication feature (commonly known as Easy Auth) is powerful, but it is only available within Azure. This makes local development and testing difficult for applications that rely on Easy Auth headers and endpoints.
+
+Easy Auth Emulator bridges that gap by providing an Azure authentication replacement gateway for local and development use.
+
+## Features
+
+- Multi-IDP authentication (Microsoft Entra ID, Google, GitHub, Apple, Facebook, OIDC)
+- Easy Auth-compatible request headers
+- Local and development environment support
+- Designed for Azure App Service, Azure Functions, Azure Container Apps, and Azure Static Web Apps compatibility (Static Web Apps: partial)
+
+## Usage Modes
+
+| Mode | Best for |
+| --- | --- |
+| **Standalone** ([binary from GitHub Releases](../../releases)) | CI / Docker / non-VS Code environments |
+| **VS Code Extension** | VS Code local development (auto-start/stop with debug sessions) |
+
+→ [Standalone setup](#setup) / [VS Code Extension](vscode-extension/README.md)
+
+## Typical Use Case
+
+```mermaid
+graph LR
+    Browser -->|request| Emulator[EasyAuth Emulator]
+    Emulator -->|unauthenticated → redirect| IdP["IdP\n(Entra ID / Google / ...)"]
+    IdP -->|OAuth2 callback| Emulator
+    Emulator -->|authenticated +\nEasy Auth headers| App[Your App]
+```
+
+Develop locally with an authentication model compatible with production Azure App Service, Azure Functions, Azure Container Apps, and Azure Static Web Apps (partial) environments.
+
+## Implemented Endpoints
+
+- `GET /.auth/me`
+- `GET /.auth/login`
+- `GET /.auth/login/select` _(emulator only — not part of Azure Easy Auth)_
+- `GET /.auth/login/<idp>`
+- `GET /.auth/login/aad`
+- `GET /.auth/logout`
+
+Any `/.auth/*` endpoint not listed above returns 404.
+
+## Injected Headers
+
+Headers forwarded to the application after authentication:
+
+- `X-MS-CLIENT-PRINCIPAL`
+- `X-MS-CLIENT-PRINCIPAL-ID`
+- `X-MS-CLIENT-PRINCIPAL-IDP`
+- `X-MS-CLIENT-PRINCIPAL-NAME`
+- `X-MS-TOKEN-AAD-ACCESS-TOKEN`
+- `X-MS-TOKEN-AAD-ID-TOKEN`
+- `X-Forwarded-User`
+- `X-Forwarded-Email`
+
+Not yet implemented: `X-MS-TOKEN-AAD-EXPIRES-ON`, `X-MS-TOKEN-AAD-REFRESH-TOKEN`.
+
+## Directory Layout
+
+```text
+start.py               # Startup script
+README.md              # This file
+README_ja.md           # Japanese version
+config.toml            # Your configuration (copy from config.toml.example)
+config.toml.example    # Configuration template
+src/
+  app.py               # HTTP gateway and auth app
+  sample_app.py        # Optional verification app
+bin/
+  oauth2-proxy/
+    oauth2-proxy[.exe] # oauth2-proxy binary (auto-downloaded on first run)
+vscode-extension/      # VS Code extension (TypeScript)
+docs/
+  configuration-reference.md     # Full environment variable reference (English)
+  runtime-guide_ja.md  # Full environment variable reference (Japanese)
+```
+
+## Setup
+
+### 1. Download
+
+Download the archive for your platform from [GitHub Releases](../../releases) and extract it:
+
+| Platform | File |
+| --- | --- |
+| Windows x64 | `easyauth-emulator-<version>-windows-amd64.zip` |
+| macOS arm64 | `easyauth-emulator-<version>-darwin-arm64.tar.gz` |
+| Linux x64 | `easyauth-emulator-<version>-linux-amd64.tar.gz` |
+
+> **macOS x64 (Intel) and Linux arm64** — Pre-built binaries are not provided for these platforms. To use on them, clone the repository and run `python scripts/package.py` to build from source.
+
+### 2. Configure config.toml
+
+Copy `config.toml.example` to `config.toml` and fill in your values.
+
+Minimum configuration (Entra ID):
+
+```env
+# URL of your application running on the host machine
+APP_UPSTREAM=http://localhost:8081
+
+# IDP settings (Entra ID)
+IDP_LIST=entra
+IDP_ENTRA_OIDC_ISSUER_URL=https://login.microsoftonline.com/<tenant-id>/v2.0
+IDP_ENTRA_CLIENT_ID=<client-id>
+IDP_ENTRA_CLIENT_SECRET=<client-secret>
+```
+
+Security note: Do not share or expose `config.toml`.
+
+For the full list of variables, see [docs/configuration-reference.md](docs/configuration-reference.md).
+
+### 3. Register Callback URL
+
+Register the OAuth2 callback URL in your identity provider:
+
+```text
+http://<SITE_URL host>:<SITE_PORT>/oauth2/callback
+```
+
+Example: `http://localhost:8080/oauth2/callback`
+
+## Usage
+
+### 1. Start
+
+```powershell
+# Windows
+.\easyauth-emulator.exe
+```
+
+```sh
+# macOS / Linux
+./easyauth-emulator
+```
+
+Press **Ctrl+C** to stop all processes cleanly.
+
+### 2. Open in a browser
+
+Navigate to `SITE_URL:SITE_PORT` (for example `http://localhost:8080/`). Unauthenticated requests are redirected to the IdP login page. After login, requests are forwarded to `APP_UPSTREAM` with Easy Auth-compatible headers injected.
+
+### Viewing oauth2-proxy Logs
+
+oauth2-proxy output is suppressed by default. To enable verbose logging, set one or more of the following in `config.toml`:
+
+```toml
+OAUTH2_PROXY_STANDARD_LOGGING = true   # startup and shutdown messages
+OAUTH2_PROXY_AUTH_LOGGING = true       # authentication events
+OAUTH2_PROXY_REQUEST_LOGGING = true    # per-request HTTP logs
+```
+
+## VS Code Extension
+
+A VS Code extension in `vscode-extension/` automatically starts and stops the emulator alongside your debug sessions. See [vscode-extension/README.md](vscode-extension/README.md) for installation and configuration details.
+
+## Reference
+
+- [docs/configuration-reference.md](docs/configuration-reference.md) — Full environment variable reference and troubleshooting
+- [README_ja.md](README_ja.md) — 日本語版
+
+## Compatibility Notes
+
+- Not a byte-for-byte implementation of Azure Easy Auth.
+- Designed for local development and compatibility testing.
+- Header coverage is partial (`X-MS-TOKEN-AAD-EXPIRES-ON` and `X-MS-TOKEN-AAD-REFRESH-TOKEN` are not implemented).
+- Endpoint coverage is partial (only the documented `/.auth/*` endpoints above are implemented).
+- `/.auth/logout` always clears the local emulator and oauth2-proxy session first; provider-side browser SSO sign-out is best-effort.
+- Login flow includes emulator-specific behavior (`/.auth/login/select`, `DEFAULT_IDP`, single-item `IDP_LIST` default handling).
+- Session handling is based on oauth2-proxy cookies and emulator routing rules, so behavior can differ from managed Easy Auth internals.
+
+## Unsupported Providers
+
+### Twitter / X
+
+Azure App Service / Container Apps Easy Auth supports Twitter/X, but this emulator cannot emulate it.
+Twitter/X uses OAuth 2.0 without OpenID Connect, and oauth2-proxy removed its native Twitter provider in v7+.
+There is currently no workaround via oauth2-proxy.

@@ -1,0 +1,7 @@
+node_modules/
+out/
+*.vsix
+bin/
+LICENSE
+vitest.config.js
+vitest.config.js.map
