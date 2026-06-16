@@ -1,0 +1,490 @@
+{
+  "name": "easyauth-emulator",
+  "displayName": "EasyAuth Emulator",
+  "description": "Integrates EasyAuth Emulator with VS Code debug sessions — auto-starts and stops the proxy as you debug.",
+  "version": "0.0.0",
+  "publisher": "easyauth",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pnopjp/easyauth-emulator"
+  },
+  "engines": {
+    "vscode": "^1.88.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "easyauth",
+    "azure",
+    "authentication",
+    "proxy",
+    "debug"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "contributes": {
+    "configuration": [
+      {
+        "id": "easyauth-extension",
+        "title": "Extension",
+        "properties": {
+          "easyauth.autoStart": {
+            "type": "boolean",
+            "default": true,
+            "order": 1,
+            "description": "Automatically start EasyAuth Emulator when a debug session begins."
+          },
+          "easyauth.autoStop": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "description": "Automatically stop EasyAuth Emulator when the linked debug session ends."
+          },
+          "easyauth.upstreamPort": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "default": null,
+            "order": 3,
+            "description": "Manually specify the upstream port. Set to null for auto-detection."
+          },
+          "easyauth.portScanMax": {
+            "type": "number",
+            "default": 5,
+            "order": 4,
+            "description": "Maximum number of consecutive ports to scan when auto-detecting the upstream port."
+          },
+          "easyauth.portScanBase": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "default": null,
+            "order": 5,
+            "description": "Base port for port scanning when no other hint is available."
+          },
+          "easyauth.verbose": {
+            "type": "boolean",
+            "default": false,
+            "order": 6,
+            "markdownDescription": "Print all resolved configuration values (secrets masked) on startup. Passes `--verbose` to the emulator process."
+          }
+        }
+      },
+      {
+        "id": "easyauth-emulator",
+        "title": "Emulator",
+        "properties": {
+          "easyauth.site.url": {
+            "type": "string",
+            "default": "http://localhost",
+            "scope": "resource",
+            "order": 1,
+            "markdownDescription": "`SITE_URL`: Public base URL of the EasyAuth gateway (without trailing slash). Used to construct the OAuth2 callback URL."
+          },
+          "easyauth.site.port": {
+            "type": "number",
+            "default": 8080,
+            "scope": "resource",
+            "order": 2,
+            "markdownDescription": "`SITE_PORT`: Public port of the EasyAuth gateway."
+          },
+          "easyauth.defaultIdp": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 3,
+            "markdownDescription": "`DEFAULT_IDP`: Default IDP when `/.auth/login` is accessed. Must match a name in the configured IDPs. Leave empty to auto-select when only one IDP is configured, or to show the selection screen when multiple IDPs are configured."
+          },
+          "easyauth.skipAuthRoutes": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 4,
+            "markdownDescription": "`SKIP_AUTH_ROUTES`: Routes that bypass authentication and are forwarded directly to upstream. Comma-separated list of `[METHOD=]REGEX` patterns.\n\n**Example:** `GET=^/health$,^/public/`"
+          },
+          "easyauth.debugHeadersEndpointEnabled": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "order": 5,
+            "markdownDescription": "`DEBUG_HEADERS_ENDPOINT_ENABLED`: Enable `GET /.debug/headers` endpoint to inspect computed auth headers."
+          },
+          "easyauth.idpSelectIcons": {
+            "type": "string",
+            "default": "simple",
+            "scope": "resource",
+            "order": 6,
+            "enum": [
+              "simple",
+              "generic",
+              "text"
+            ],
+            "enumDescriptions": [
+              "Simple Icons CDN logos (requires internet access).",
+              "Generic ID card icon (fully offline).",
+              "No icons, text only."
+            ],
+            "markdownDescription": "`IDP_SELECT_ICONS`: Icon style on the `/.auth/login/select` screen."
+          }
+        }
+      },
+      {
+        "id": "easyauth-entra",
+        "title": "Microsoft Entra",
+        "properties": {
+          "easyauth.entra.displayName": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 1,
+            "markdownDescription": "`IDP_ENTRA_DISPLAY_NAME`: Label shown on the IDP selection screen. Default: `entra`."
+          },
+          "easyauth.entra.clientId": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 2,
+            "markdownDescription": "**Required.** `IDP_ENTRA_CLIENT_ID`: Application (client) ID registered with Microsoft Entra."
+          },
+          "easyauth.entra.oidcIssuerUrl": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 4,
+            "markdownDescription": "`IDP_ENTRA_OIDC_ISSUER_URL`: Full OIDC issuer URL. Example: `https://login.microsoftonline.com/<tenantId>/v2.0`. Leave empty to use the common endpoint (allows any tenant)."
+          },
+          "easyauth.entra.scopes": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 5,
+            "markdownDescription": "`IDP_ENTRA_SCOPES`: Space-separated OAuth2 scopes. Default: `openid profile email`. Add Microsoft Graph scopes here (e.g. `openid profile email https://graph.microsoft.com/User.Read`)."
+          },
+          "easyauth.entra.authUserIdClaim": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 6,
+            "markdownDescription": "`IDP_ENTRA_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `preferred_username`."
+          }
+        }
+      },
+      {
+        "id": "easyauth-google",
+        "title": "Google",
+        "properties": {
+          "easyauth.google.displayName": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 1,
+            "markdownDescription": "`IDP_GOOGLE_DISPLAY_NAME`: Label shown on the IDP selection screen. Default: `google`."
+          },
+          "easyauth.google.clientId": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 2,
+            "markdownDescription": "**Required.** `IDP_GOOGLE_CLIENT_ID`: OAuth 2.0 Client ID."
+          },
+          "easyauth.google.scopes": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 4,
+            "markdownDescription": "`IDP_GOOGLE_SCOPES`: Space-separated OAuth2 scopes. Default: `openid profile email`."
+          },
+          "easyauth.google.authUserIdClaim": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 5,
+            "markdownDescription": "`IDP_GOOGLE_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `email`."
+          }
+        }
+      },
+      {
+        "id": "easyauth-facebook",
+        "title": "Facebook",
+        "properties": {
+          "easyauth.facebook.displayName": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 1,
+            "markdownDescription": "`IDP_FACEBOOK_DISPLAY_NAME`: Label shown on the IDP selection screen. Default: `facebook`."
+          },
+          "easyauth.facebook.clientId": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 2,
+            "markdownDescription": "**Required.** `IDP_FACEBOOK_CLIENT_ID`: App ID."
+          },
+          "easyauth.facebook.scopes": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 4,
+            "markdownDescription": "`IDP_FACEBOOK_SCOPES`: Space-separated OAuth2 scopes. Default: `openid profile email`."
+          },
+          "easyauth.facebook.authUserIdClaim": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 5,
+            "markdownDescription": "`IDP_FACEBOOK_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `id`."
+          }
+        }
+      },
+      {
+        "id": "easyauth-apple",
+        "title": "Apple",
+        "properties": {
+          "easyauth.apple.displayName": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 1,
+            "markdownDescription": "`IDP_APPLE_DISPLAY_NAME`: Label shown on the IDP selection screen. Default: `apple`."
+          },
+          "easyauth.apple.clientId": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 2,
+            "markdownDescription": "**Required.** `IDP_APPLE_CLIENT_ID`: Services ID (client ID)."
+          },
+          "easyauth.apple.scopes": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 4,
+            "markdownDescription": "`IDP_APPLE_SCOPES`: Space-separated OAuth2 scopes. Default: `openid profile email`."
+          },
+          "easyauth.apple.authUserIdClaim": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 5,
+            "markdownDescription": "`IDP_APPLE_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `email`."
+          }
+        }
+      },
+      {
+        "id": "easyauth-github",
+        "title": "GitHub",
+        "properties": {
+          "easyauth.github.displayName": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 1,
+            "markdownDescription": "`IDP_GITHUB_DISPLAY_NAME`: Label shown on the IDP selection screen. Default: `github`."
+          },
+          "easyauth.github.clientId": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 2,
+            "markdownDescription": "**Required.** `IDP_GITHUB_CLIENT_ID`: OAuth App Client ID."
+          },
+          "easyauth.github.scopes": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 4,
+            "markdownDescription": "`IDP_GITHUB_SCOPES`: Space-separated OAuth2 scopes. Default: `openid profile email`."
+          },
+          "easyauth.github.authUserIdClaim": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 5,
+            "markdownDescription": "`IDP_GITHUB_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `login`."
+          }
+        }
+      },
+      {
+        "id": "easyauth-custom",
+        "title": "Custom OIDC Providers",
+        "properties": {
+          "easyauth.customIdps": {
+            "type": "array",
+            "default": [],
+            "scope": "resource",
+            "order": 1,
+            "markdownDescription": "Custom OIDC providers (e.g. LINE, Auth0, Salesforce). Each entry is added to `IDP_LIST` and mapped to `IDP_<NAME>_*` environment variables, where `<NAME>` is the uppercased `name` field.\n\n**Required fields per entry:** `name`, `clientId`, `oidcIssuerUrl`\n\nClient secrets must be registered separately via the **EasyAuth Emulator: Set Client Secret** command (stored encrypted in the OS keychain).\n\n**Example:**\n```json\n[\n  {\n    \"name\": \"line\",\n    \"displayName\": \"LINE\",\n    \"clientId\": \"your-client-id\",\n    \"oidcIssuerUrl\": \"https://access.line.me\"\n  },\n  {\n    \"name\": \"auth0\",\n    \"displayName\": \"Auth0\",\n    \"clientId\": \"your-client-id\",\n    \"oidcIssuerUrl\": \"https://your-tenant.auth0.com\"\n  }\n]\n```",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "clientId",
+                "oidcIssuerUrl"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "IDP identifier used in IDP_LIST (e.g. 'line', 'auth0'). Lowercase alphanumeric and hyphens only."
+                },
+                "displayName": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_DISPLAY_NAME: Label shown on the IDP selection screen."
+                },
+                "clientId": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_CLIENT_ID: OAuth2 / OIDC client ID."
+                },
+                "oidcIssuerUrl": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_OIDC_ISSUER_URL: OIDC issuer URL (e.g. https://access.line.me)."
+                },
+                "authProvider": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_AUTH_PROVIDER: Value set in X-MS-CLIENT-PRINCIPAL-IDP header (e.g. 'line')."
+                },
+                "authUserIdClaim": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_AUTH_USER_ID_CLAIM: JWT claim used as user ID. Default: 'sub'."
+                },
+                "scopes": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_SCOPES: Space-separated OAuth2 scopes. Default: 'openid profile email'."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_PROMPT: OIDC prompt parameter (e.g. 'login', 'consent')."
+                },
+                "logoutEndpoint": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_LOGOUT_ENDPOINT: Override the IDP logout URL."
+                },
+                "skipClaimsFromProfileUrl": {
+                  "type": "boolean",
+                  "description": "IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL: Skip fetching additional claims from the userinfo endpoint."
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      {
+        "id": "easyauth-oauth2proxy",
+        "title": "oauth2-proxy",
+        "properties": {
+          "easyauth.oauth2proxy.portBase": {
+            "type": "number",
+            "default": 4180,
+            "scope": "resource",
+            "order": 1,
+            "markdownDescription": "`OAUTH2_PROXY_PORT_BASE`: Base port for internal oauth2-proxy instances. Each IDP uses a consecutive port starting from this value (e.g. 4180, 4181, …)."
+          },
+          "easyauth.oauth2proxy.standardLogging": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "order": 2,
+            "markdownDescription": "`OAUTH2_PROXY_STANDARD_LOGGING`: Show oauth2-proxy startup/shutdown messages in the Output channel."
+          },
+          "easyauth.oauth2proxy.authLogging": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "order": 3,
+            "markdownDescription": "`OAUTH2_PROXY_AUTH_LOGGING`: Show oauth2-proxy authentication events in the Output channel."
+          },
+          "easyauth.oauth2proxy.requestLogging": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "order": 4,
+            "markdownDescription": "`OAUTH2_PROXY_REQUEST_LOGGING`: Show oauth2-proxy per-request HTTP logs in the Output channel."
+          },
+          "easyauth.oauth2proxy.showDebugOnError": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "order": 5,
+            "markdownDescription": "`OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR`: Show detailed error info on OIDC failures (e.g. misconfigured client ID or issuer URL). Useful during setup."
+          },
+          "easyauth.oauth2proxy.version": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 6,
+            "markdownDescription": "`OAUTH2_PROXY_VERSION`: Pin oauth2-proxy to a specific version tag (e.g. `v7.6.0`). Leave empty to use the latest stable version."
+          },
+          "easyauth.oauth2proxy.autoUpdate": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`OAUTH2_PROXY_AUTO_UPDATE`: Automatically update oauth2-proxy to the latest version on startup. When false, a notification is shown if a newer version is available."
+          },
+          "easyauth.oauth2proxy.sslCaBundle": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 8,
+            "markdownDescription": "`SSL_CA_BUNDLE`: Path to a custom CA certificate bundle (PEM format). Normally not needed — the OS certificate store (Windows, macOS, Linux) is used automatically. Set this only when the required CA is not in the OS trust store, for example on Linux systems where the corporate CA cannot be added to the system store."
+          }
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "easyauth.start",
+        "title": "EasyAuth Emulator: Start"
+      },
+      {
+        "command": "easyauth.stop",
+        "title": "EasyAuth Emulator: Stop"
+      },
+      {
+        "command": "easyauth.restart",
+        "title": "EasyAuth Emulator: Restart"
+      },
+      {
+        "command": "easyauth.openOutput",
+        "title": "EasyAuth Emulator: Open Output"
+      },
+      {
+        "command": "easyauth.openInBrowser",
+        "title": "EasyAuth Emulator: Open in Browser"
+      },
+      {
+        "command": "easyauth.setSecret",
+        "title": "EasyAuth Emulator: Set Client Secret"
+      },
+      {
+        "command": "easyauth.clearSecret",
+        "title": "EasyAuth Emulator: Clear Client Secret"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "vitest run",
+    "prepackage": "node -e \"const fs=require('fs'),src='../dist/easyauth-emulator',dst='bin/easyauth-emulator';if(fs.existsSync(dst))fs.rmSync(dst,{recursive:true,force:true});fs.cpSync(src,dst,{recursive:true})\"",
+    "package": "node -e \"require('fs').copyFileSync('../LICENSE','LICENSE')\" && vsce package --target win32-x64 && node -e \"require('fs').unlinkSync('LICENSE')\"",
+    "postpackage": "node -e \"require('fs').rmSync('bin/easyauth-emulator',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.88.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.3.0",
+    "vitest": "^2.0.0"
+  }
+}

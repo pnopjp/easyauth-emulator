@@ -1,0 +1,186 @@
+# ---- General settings -------------------------------------------------------
+
+# Comma-separated IDP IDs. Order is used only for the selection page list.
+# Auto-login when DEFAULT_IDP is set, or when IDP_LIST has exactly one entry.
+IDP_LIST = [ "entra", "google" ]
+
+# Optional explicit default IDP (must be one of IDP_LIST)
+# DEFAULT_IDP = ""
+
+# Site URL and public port used to build the OAuth2 callback URL.
+SITE_URL = "http://localhost"
+SITE_PORT = "8080"
+
+# URL of the application that authenticated requests are forwarded to.
+# Defaults to http://localhost:8081 (same as the default SAMPLE_APP_PORT).
+# When SAMPLE_APP_ENABLED is false, set this to the port of your own application.
+APP_UPSTREAM = "http://localhost:8081"
+
+# Debug endpoint (default: disabled).
+# When true, enables GET /.debug/headers for inspecting forwarded headers.
+DEBUG_HEADERS_ENDPOINT_ENABLED = false
+
+# Print all resolved configuration values on startup (secrets masked).
+# Can also be enabled with the --verbose / -v CLI flag.
+# VERBOSE = false
+
+# Routes that bypass authentication entirely (forwarded to upstream without auth check).
+# Format: comma-separated list of [METHOD=]REGEX patterns matched against the request path.
+# Example: SKIP_AUTH_ROUTES = ["GET=^/health$", "^/public/"]
+# SKIP_AUTH_ROUTES = []
+
+# Icon style for the /.auth/login/select page (default: simple).
+#   simple   — Simple Icons CDN logo (https://simpleicons.org)
+#   generic  — generic ID card icon (fully offline, no brand icons)
+#   text     — no icon, text labels only
+# IDP_SELECT_ICONS = "simple"
+
+# ---- Network / SSL settings -------------------------------------------------
+
+# Path to a custom CA certificate bundle (PEM format).
+# Normally not needed — the OS certificate store (Windows, macOS, Linux) is used
+# automatically. Set this only when the required CA is not in the OS trust store.
+# Example: SSL_CA_BUNDLE = "C:/certs/corporate-ca.pem"
+# SSL_CA_BUNDLE = ""
+
+# ---- oauth2-proxy settings --------------------------------------------------
+
+# Session cookie secret. Auto-generated and saved here on first startup if not set.
+# To rotate the secret (which invalidates all existing sessions), replace the value below.
+OAUTH2_PROXY_COOKIE_SECRET = ""
+
+# Set to false for plain HTTP (local development without TLS).
+OAUTH2_PROXY_COOKIE_SECURE = false
+
+# Base port for internal oauth2-proxy instances.
+# Each IDP uses a consecutive port starting from this value (e.g. 4180, 4181, ...).
+# OAUTH2_PROXY_PORT_BASE = "4180"
+
+# Optional: allowed domain for redirect targets.
+# Defaults to host[:port] derived from SITE_URL/SITE_PORT when not set.
+# OAUTH2_PROXY_WHITELIST_DOMAIN = ""
+
+# oauth2-proxy log output (all default to false).
+# Errors on startup failure are always shown regardless of these settings.
+# OAUTH2_PROXY_STANDARD_LOGGING = false  # startup/shutdown messages
+# OAUTH2_PROXY_AUTH_LOGGING = false       # authentication events
+# OAUTH2_PROXY_REQUEST_LOGGING = false    # per-request HTTP logs
+# OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR = false  # show debug info on OIDC errors (development only)
+
+# Binary management (see docs/runtime-guide.md for details).
+# Download target platform. Auto-detected from the running OS/arch if not set.
+# Required only when auto-detection fails (e.g. unusual architectures or cross-platform setups).
+# Valid values: windows-amd64, windows-arm64, linux-amd64, linux-arm64, linux-arm, darwin-amd64, darwin-arm64
+# OAUTH2_PROXY_PLATFORM = ""
+
+# Pin a specific version tag (e.g. "v7.6.0"). Uses latest stable release if not set.
+# When set, the binary is updated on startup if the installed version does not match.
+# This also avoids the GitHub "latest release" API lookup on first install.
+# OAUTH2_PROXY_VERSION = ""
+
+# Automatically update to the latest (or pinned) version on startup (default: false).
+# When false, a notice is printed if a newer version is available but no update is performed.
+# Network errors during the version check are ignored and startup continues.
+# OAUTH2_PROXY_AUTO_UPDATE = false
+
+# ---- Per-IDP settings -------------------------------------------------------
+#
+# Supported IDP kinds:
+#   microsoft  — Entra ID / Microsoft account
+#   google
+#   apple
+#   facebook
+#   github
+#   openid-connect
+
+# Per-IDP variable template — replace <NAME> with an ID from IDP_LIST.
+# IDP_<NAME>_DISPLAY_NAME = ""
+# IDP_<NAME>_KIND = ""               # microsoft | apple | facebook | github | google | openid-connect
+# IDP_<NAME>_OIDC_ISSUER_URL = ""    # required for microsoft, apple, google, openid-connect
+# IDP_<NAME>_CLIENT_ID = ""
+# IDP_<NAME>_CLIENT_SECRET = ""
+# IDP_<NAME>_AUTH_PROVIDER = ""      # defaults from KIND when omitted
+# IDP_<NAME>_AUTH_USER_ID_CLAIM = "" # defaults from KIND when omitted
+# IDP_<NAME>_SCOPES = ""             # optional; default: openid profile email
+# IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL = false  # default: true for microsoft, false for others
+# IDP_<NAME>_PROMPT = ""             # optional: login | select_account | consent
+# IDP_<NAME>_LOGOUT_ENDPOINT = ""    # optional; for microsoft, derived from OIDC_ISSUER_URL when omitted
+
+# --- Entra ID (enabled by IDP_LIST = "entra") --------------------------------
+IDP_ENTRA_DISPLAY_NAME = "Microsoft Entra ID"
+IDP_ENTRA_KIND = "microsoft"
+IDP_ENTRA_OIDC_ISSUER_URL = "https://login.microsoftonline.com/<TENANT_ID>/v2.0"
+IDP_ENTRA_CLIENT_ID = ""
+IDP_ENTRA_CLIENT_SECRET = ""
+IDP_ENTRA_AUTH_PROVIDER = "aad"
+IDP_ENTRA_AUTH_USER_ID_CLAIM = "preferred_username"
+IDP_ENTRA_SCOPES = "openid profile email"
+# IDP_ENTRA_SKIP_CLAIMS_FROM_PROFILE_URL = true
+# IDP_ENTRA_PROMPT = "login"
+# IDP_ENTRA_LOGOUT_ENDPOINT = ""
+
+# --- Google ------------------------------------------------------------------
+# IDP_GOOGLE_DISPLAY_NAME = "Google"
+# IDP_GOOGLE_KIND = "google"
+# IDP_GOOGLE_OIDC_ISSUER_URL = "https://accounts.google.com"
+# IDP_GOOGLE_CLIENT_ID = ""
+# IDP_GOOGLE_CLIENT_SECRET = ""
+# IDP_GOOGLE_AUTH_PROVIDER = "google"
+# IDP_GOOGLE_AUTH_USER_ID_CLAIM = "email"
+# IDP_GOOGLE_SCOPES = "openid profile email"
+# IDP_GOOGLE_PROMPT = "select_account"
+
+# --- Apple -------------------------------------------------------------------
+# IDP_APPLE_DISPLAY_NAME = "Apple"
+# IDP_APPLE_KIND = "apple"
+# IDP_APPLE_OIDC_ISSUER_URL = "https://appleid.apple.com"
+# IDP_APPLE_CLIENT_ID = ""
+# IDP_APPLE_CLIENT_SECRET = ""
+# IDP_APPLE_SCOPES = "openid email name"
+
+# --- Facebook ----------------------------------------------------------------
+# IDP_FACEBOOK_DISPLAY_NAME = "Facebook"
+# IDP_FACEBOOK_KIND = "facebook"
+# IDP_FACEBOOK_CLIENT_ID = ""
+# IDP_FACEBOOK_CLIENT_SECRET = ""
+
+# --- GitHub ------------------------------------------------------------------
+# IDP_GITHUB_DISPLAY_NAME = "GitHub"
+# IDP_GITHUB_KIND = "github"
+# IDP_GITHUB_CLIENT_ID = ""
+# IDP_GITHUB_CLIENT_SECRET = ""
+# IDP_GITHUB_SCOPES = "read:user user:email"
+
+# --- Generic OpenID Connect --------------------------------------------------
+# IDP_OPENID_CONNECT_DISPLAY_NAME = "OpenID Connect"
+# IDP_OPENID_CONNECT_KIND = "openid-connect"
+# IDP_OPENID_CONNECT_OIDC_ISSUER_URL = ""
+# IDP_OPENID_CONNECT_CLIENT_ID = ""
+# IDP_OPENID_CONNECT_CLIENT_SECRET = ""
+# IDP_OPENID_CONNECT_SCOPES = "openid profile email"
+
+# ---- sample_app settings (optional verification app) -----------------------
+
+# Set to true to start sample_app.py as an internal verification app (default: false).
+# SAMPLE_APP_ENABLED = false
+
+# Internal port for sample_app.py (default: 8081).
+# Set APP_UPSTREAM to this value to route traffic through the sample app.
+# SAMPLE_APP_PORT = "8081"
+
+# Azure Blob Storage URL for delegated storage access verification.
+# Format: https://<account>.blob.core.windows.net/<container>/<blob>
+# SAMPLE_APP_STORAGE_BLOB_URL = ""
+
+# OBO scope used when requesting a storage access token (default: https://storage.azure.com/.default).
+# SAMPLE_APP_OBO_STORAGE_SCOPE = "https://storage.azure.com/.default"
+
+# Storage request timeout in seconds (default: 10).
+# SAMPLE_APP_STORAGE_TIMEOUT_SECONDS = "10"
+
+# Number of bytes to preview from the storage response (default: 4096).
+# SAMPLE_APP_STORAGE_PREVIEW_BYTES = "4096"
+
+# Display name and description shown in the sample app UI.
+# SAMPLE_APP_TITLE = "Easy Auth verification app"
+# SAMPLE_APP_DESCRIPTION = ""

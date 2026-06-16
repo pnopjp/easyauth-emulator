@@ -1,0 +1,365 @@
+import * as vscode from 'vscode';
+import * as cp from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import { StatusBarManager, EmulatorState } from './statusBar';
+import { SecretManager } from './secretManager';
+
+const STARTUP_TIMEOUT_MS = 30_000;
+const STARTED_MARKER = 'All processes started';
+
+export class EmulatorManager implements vscode.Disposable {
+    private state: EmulatorState = 'stopped';
+    private process: cp.ChildProcess | null = null;
+    private sessionId: string | null = null;
+    private startTimeout: ReturnType<typeof setTimeout> | null = null;
+    private currentPort: number | null = null;
+
+    constructor(
+        private readonly context: vscode.ExtensionContext,
+        private readonly outputChannel: vscode.OutputChannel,
+        private readonly statusBar: StatusBarManager,
+        private readonly secretManager: SecretManager,
+    ) {
+        statusBar.update(this.hasConfig() ? 'stopped' : 'unconfigured', null, null);
+    }
+
+    isManaging(): boolean {
+        return this.sessionId !== null;
+    }
+
+    isManagingSession(sessionId: string): boolean {
+        return this.sessionId === sessionId;
+    }
+
+    getState(): EmulatorState {
+        return this.state;
+    }
+
+    getCurrentPort(): number | null {
+        return this.currentPort;
+    }
+
+    async start(port: number, sessionId: string): Promise<void> {
+        if (this.state !== 'stopped') {
+            if (this.currentPort !== port) {
+                // Port changed — restart with new port
+                await this.stop();
+            } else {
+                return;
+            }
+        }
+
+        const resolved = this.resolveBinary();
+        if (!resolved) {
+            vscode.window.showErrorMessage(
+                'EasyAuth Emulator binary not found.'
+            );
+            return;
+        }
+
+        if (!this.hasConfig()) {
+            this.outputChannel.appendLine('[extension] Config file not found. Create .vscode/easyauth.json in the workspace root, or configure IDP settings.');
+            this.setState('unconfigured');
+            return;
+        }
+
+        const { cmd, cmdArgs } = this.buildArgs(resolved);
+        this.sessionId = sessionId;
+        this.currentPort = port;
+        this.setState('starting');
+
+        this.outputChannel.appendLine(`[extension] Starting EasyAuth Emulator on upstream port ${port}`);
+        this.outputChannel.appendLine(`[extension] $ ${cmd} ${cmdArgs.join(' ')}`);
+
+        try {
+            const env = await this.buildEnv(port);
+            const proc = cp.spawn(cmd, cmdArgs, {
+                cwd: this.workspaceRoot(),
+                env,
+                stdio: ['ignore', 'pipe', 'pipe'],
+                windowsHide: true,
+            });
+            this.process = proc;
+
+            proc.stdout?.on('data', (data: Buffer) => {
+                const text = data.toString();
+                this.outputChannel.append(text);
+                if (this.state === 'starting' && text.includes(STARTED_MARKER)) {
+                    this.clearStartTimeout();
+                    this.setState('running');
+                }
+            });
+
+            proc.stderr?.on('data', (data: Buffer) => {
+                this.outputChannel.append(data.toString());
+            });
+
+            proc.on('exit', (code) => {
+                // Ignore stale exit events from a process that was already replaced
+                if (this.process !== proc) { return; }
+                this.clearStartTimeout();
+                if (this.state !== 'stopped') {
+                    if (code !== 0 && code !== null) {
+                        this.setState('error');
+                        this.notifyError();
+                    } else {
+                        this.setState('stopped');
+                    }
+                }
+                this.process = null;
+                this.sessionId = null;
+                this.currentPort = null;
+            });
+
+            proc.on('error', (err) => {
+                // Ignore stale error events from a process that was already replaced
+                if (this.process !== proc) { return; }
+                this.clearStartTimeout();
+                this.outputChannel.appendLine(`[extension] Spawn error: ${err.message}`);
+                this.setState('error');
+                this.process = null;
+                this.sessionId = null;
+                this.currentPort = null;
+            });
+
+            this.startTimeout = setTimeout(() => {
+                if (this.state === 'starting') {
+                    this.outputChannel.appendLine(
+                        `[extension] Startup timeout: "${STARTED_MARKER}" not detected within 30 s`
+                    );
+                    this.setState('error');
+                    this.notifyError();
+                }
+            }, STARTUP_TIMEOUT_MS);
+        } catch (err) {
+            this.outputChannel.appendLine(`[extension] Error: ${err}`);
+            this.setState('error');
+            this.sessionId = null;
+            this.currentPort = null;
+        }
+    }
+
+    async stop(): Promise<void> {
+        this.clearStartTimeout();
+        if (this.process) {
+            this.outputChannel.appendLine('[extension] Stopping EasyAuth Emulator');
+            const pid = this.process.pid;
+            this.process = null;
+            if (process.platform === 'win32' && pid !== undefined) {
+                // taskkill /T kills the entire process tree (start.py + oauth2-proxy children)
+                cp.spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true });
+            } else {
+                try { cp.spawnSync('kill', ['-TERM', String(pid)]); } catch { /* ignore */ }
+            }
+        }
+        this.sessionId = null;
+        this.currentPort = null;
+        this.setState('stopped');
+    }
+
+    async restart(): Promise<void> {
+        const port = this.currentPort;
+        const sessionId = this.sessionId;
+        await this.stop();
+        if (port !== null && sessionId !== null) {
+            await this.start(port, sessionId);
+        }
+    }
+
+    dispose(): void {
+        void this.stop();
+    }
+
+    private setState(state: EmulatorState): void {
+        this.state = state;
+        void vscode.commands.executeCommand('setContext', 'easyauth.running', state === 'running');
+        const listenPort = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
+        this.statusBar.update(state, listenPort, this.currentPort);
+    }
+
+    private clearStartTimeout(): void {
+        if (this.startTimeout !== null) {
+            clearTimeout(this.startTimeout);
+            this.startTimeout = null;
+        }
+    }
+
+    private notifyError(): void {
+        vscode.window.showErrorMessage(
+            'EasyAuth Emulator exited unexpectedly.',
+            'Open Output'
+        ).then((sel) => {
+            if (sel === 'Open Output') {
+                this.outputChannel.show();
+            }
+        });
+    }
+
+    private resolveBinary(): string | null {
+        // Bundled binary (packed into the VSIX under /bin/)
+        const extDir = this.context.extensionPath;
+        const exe = process.platform === 'win32' ? 'easyauth-emulator.exe' : 'easyauth-emulator';
+        const bundled = path.join(extDir, 'bin', 'easyauth-emulator', exe);
+        if (fs.existsSync(bundled)) return bundled;
+
+        // Development fallback: start.py lives one level above the extension directory
+        const devStartPy = path.resolve(extDir, '..', 'start.py');
+        if (fs.existsSync(devStartPy)) return devStartPy;
+
+        return null;
+    }
+
+    private buildArgs(binaryPath: string): { cmd: string; cmdArgs: string[] } {
+        const extraArgs: string[] = [];
+
+        // Always pass --config pointing to .vscode/easyauth.toml.
+        // If the file exists it is loaded as a base config; if not, auto-discovery is suppressed
+        // (prevents accidentally reading a project-owned config.toml in the workspace root).
+        const wsRoot = this.workspaceRoot();
+        if (wsRoot) {
+            const configPath = path.join(wsRoot, '.vscode', 'easyauth.toml');
+            extraArgs.push('--config', configPath);
+            if (fs.existsSync(configPath)) {
+                this.outputChannel.appendLine(`[extension] Using config: ${configPath}`);
+            }
+        }
+
+        if (vscode.workspace.getConfiguration('easyauth').get<boolean>('verbose', false)) {
+            extraArgs.push('--verbose');
+        }
+
+        if (binaryPath.endsWith('.py')) {
+            return { cmd: 'python', cmdArgs: ['-u', binaryPath, ...extraArgs] };
+        }
+        return { cmd: binaryPath, cmdArgs: extraArgs };
+    }
+
+    hasConfig(): boolean {
+        const vsConfig = vscode.workspace.getConfiguration('easyauth');
+        const builtins = ['entra', 'google', 'facebook', 'apple', 'github'];
+        if (builtins.some(idp => vsConfig.get<string>(`${idp}.clientId`, '').trim())) return true;
+        const customs = vsConfig.get<Array<{ name?: string; clientId?: string }>>('customIdps', []);
+        return customs.some(idp => idp.name?.trim() && idp.clientId?.trim());
+    }
+
+    private async buildEnv(port: number): Promise<NodeJS.ProcessEnv> {
+        const config = vscode.workspace.getConfiguration('easyauth');
+        const extra: Record<string, string> = {};
+
+        extra['PYTHONUNBUFFERED'] = '1';
+        extra['APP_UPSTREAM'] = `http://localhost:${port}`;
+
+        // Site
+        const siteUrl = config.get<string>('site.url', '').trim();
+        if (siteUrl) extra['SITE_URL'] = siteUrl;
+        const sitePort = config.get<number | null>('site.port', null);
+        if (sitePort !== null) extra['SITE_PORT'] = String(sitePort);
+
+        // Global IDP settings
+        const defaultIdp = config.get<string>('defaultIdp', '').trim();
+        if (defaultIdp) extra['DEFAULT_IDP'] = defaultIdp;
+        const skipAuthRoutes = config.get<string>('skipAuthRoutes', '').trim();
+        if (skipAuthRoutes) extra['SKIP_AUTH_ROUTES'] = skipAuthRoutes;
+        if (config.get<boolean>('debugHeadersEndpointEnabled', false)) {
+            extra['DEBUG_HEADERS_ENDPOINT_ENABLED'] = 'true';
+        }
+        const idpSelectIcons = config.get<string>('idpSelectIcons', '').trim();
+        if (idpSelectIcons) extra['IDP_SELECT_ICONS'] = idpSelectIcons;
+
+        // Built-in IDPs
+        const BUILTIN_IDPS: Array<[string, string]> = [
+            ['entra', 'ENTRA'],
+            ['google', 'GOOGLE'],
+            ['facebook', 'FACEBOOK'],
+            ['apple', 'APPLE'],
+            ['github', 'GITHUB'],
+        ];
+        const idpList: string[] = [];
+        for (const [idpName, envKey] of BUILTIN_IDPS) {
+            const clientId = config.get<string>(`${idpName}.clientId`, '').trim();
+            if (!clientId) continue;
+            const clientSecret = await this.secretManager.get(idpName);
+            if (!clientSecret) {
+                this.outputChannel.appendLine(`[extension] Warning: ${idpName} clientId is set but no client secret found — run "EasyAuth Emulator: Set Client Secret"`);
+                continue;
+            }
+            idpList.push(idpName);
+            extra[`IDP_${envKey}_CLIENT_ID`] = clientId;
+            extra[`IDP_${envKey}_CLIENT_SECRET`] = clientSecret;
+            const displayName = config.get<string>(`${idpName}.displayName`, '').trim();
+            if (displayName) extra[`IDP_${envKey}_DISPLAY_NAME`] = displayName;
+            const scopes = config.get<string>(`${idpName}.scopes`, '').trim();
+            if (scopes) extra[`IDP_${envKey}_SCOPES`] = scopes;
+            const authUserIdClaim = config.get<string>(`${idpName}.authUserIdClaim`, '').trim();
+            if (authUserIdClaim) extra[`IDP_${envKey}_AUTH_USER_ID_CLAIM`] = authUserIdClaim;
+        }
+
+        // Entra-specific: full OIDC issuer URL
+        const entraIssuerUrl = config.get<string>('entra.oidcIssuerUrl', '').trim();
+        if (entraIssuerUrl) {
+            extra['IDP_ENTRA_OIDC_ISSUER_URL'] = entraIssuerUrl;
+        }
+
+        // Custom OIDC IDPs
+        interface CustomIdp {
+            name: string;
+            clientId: string;
+            oidcIssuerUrl: string;
+            displayName?: string;
+            scopes?: string;
+            authProvider?: string;
+            authUserIdClaim?: string;
+            prompt?: string;
+            logoutEndpoint?: string;
+            skipClaimsFromProfileUrl?: boolean;
+        }
+        const customIdps = config.get<CustomIdp[]>('customIdps', []);
+        for (const idp of customIdps) {
+            const name = idp.name?.trim();
+            if (!name || !idp.clientId?.trim()) continue;
+            const clientSecret = await this.secretManager.get(`custom:${name}`);
+            if (!clientSecret) {
+                this.outputChannel.appendLine(`[extension] Warning: custom IDP '${name}' clientId is set but no client secret found — run "EasyAuth Emulator: Set Client Secret"`);
+                continue;
+            }
+            idpList.push(name);
+            const envKey = name.toUpperCase().replace(/-/g, '_');
+            extra[`IDP_${envKey}_CLIENT_ID`] = idp.clientId.trim();
+            extra[`IDP_${envKey}_CLIENT_SECRET`] = clientSecret;
+            extra[`IDP_${envKey}_OIDC_ISSUER_URL`] = idp.oidcIssuerUrl.trim();
+            if (idp.displayName?.trim()) extra[`IDP_${envKey}_DISPLAY_NAME`] = idp.displayName.trim();
+            if (idp.scopes?.trim()) extra[`IDP_${envKey}_SCOPES`] = idp.scopes.trim();
+            if (idp.authProvider?.trim()) extra[`IDP_${envKey}_AUTH_PROVIDER`] = idp.authProvider.trim();
+            if (idp.authUserIdClaim?.trim()) extra[`IDP_${envKey}_AUTH_USER_ID_CLAIM`] = idp.authUserIdClaim.trim();
+            if (idp.prompt?.trim()) extra[`IDP_${envKey}_PROMPT`] = idp.prompt.trim();
+            if (idp.logoutEndpoint?.trim()) extra[`IDP_${envKey}_LOGOUT_ENDPOINT`] = idp.logoutEndpoint.trim();
+            if (idp.skipClaimsFromProfileUrl) extra[`IDP_${envKey}_SKIP_CLAIMS_FROM_PROFILE_URL`] = 'true';
+        }
+
+        if (idpList.length > 0) extra['IDP_LIST'] = idpList.join(',');
+
+        // oauth2-proxy settings
+        const oauth2 = vscode.workspace.getConfiguration('easyauth.oauth2proxy');
+        const portBase = oauth2.get<number | null>('portBase', null);
+        if (portBase !== null) extra['OAUTH2_PROXY_PORT_BASE'] = String(portBase);
+        if (oauth2.get<boolean>('showDebugOnError', false)) extra['OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR'] = 'true';
+        if (oauth2.get<boolean>('standardLogging', false)) extra['OAUTH2_PROXY_STANDARD_LOGGING'] = 'true';
+        if (oauth2.get<boolean>('authLogging', false)) extra['OAUTH2_PROXY_AUTH_LOGGING'] = 'true';
+        if (oauth2.get<boolean>('requestLogging', false)) extra['OAUTH2_PROXY_REQUEST_LOGGING'] = 'true';
+        const proxyVersion = oauth2.get<string>('version', '').trim();
+        if (proxyVersion) extra['OAUTH2_PROXY_VERSION'] = proxyVersion;
+        if (oauth2.get<boolean>('autoUpdate', false)) extra['OAUTH2_PROXY_AUTO_UPDATE'] = 'true';
+        const sslCaBundle = oauth2.get<string>('sslCaBundle', '').trim();
+        if (sslCaBundle) extra['SSL_CA_BUNDLE'] = sslCaBundle;
+
+        // Cookie secret: generate once and persist per workspace in SecretStorage (encrypted)
+        extra['OAUTH2_PROXY_COOKIE_SECRET'] = await this.secretManager.getCookieSecret();
+
+        return { ...process.env, ...extra };
+    }
+
+    private workspaceRoot(): string | undefined {
+        return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    }
+}

@@ -1,0 +1,142 @@
+# ランタイムガイド
+
+このドキュメントでは、ランタイム設定、互換性の境界、トラブルシューティング情報をまとめます。
+
+## 設定パラメーター
+
+セキュリティ注意:
+
+- `config.toml` にはシークレット（例: `OAUTH2_PROXY_COOKIE_SECRET`、`IDP_<NAME>_CLIENT_SECRET`）が含まれます。`config.toml` を公開・コミットしないでください。
+
+### グローバル設定
+
+| パラメーター | 必須 | 既定値 | 説明 |
+| --- | :---: | --- | --- |
+| `IDP_LIST` | ✓ | — | 有効にする IdP 名をカンマ区切りで列挙（例: `entra,google`）。順序は選択画面の表示順。 |
+| `DEFAULT_IDP` | | — | 未認証時に使用する既定 IdP。`IDP_LIST` に含まれる値を指定。未設定時の挙動は下記参照。 |
+| `SITE_URL` | | `http://localhost` | このゲートウェイの公開 URL（末尾スラッシュなし）。OAuth2 callback URL の構築に使用。 |
+| `SITE_PORT` | | `8080` | このゲートウェイの公開ポート。`SITE_URL` とともにゲートウェイのベース URL を形成する。 |
+| `APP_UPSTREAM` | | `http://localhost:8081` ※ | 認証済みリクエストの転送先 URL。自分のアプリを使う場合はそのアプリの URL を設定してください。 |
+| `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | `GET /.debug/headers` 診断エンドポイントを有効化するか。有効時はその URL でエミュレーターが受け取り計算したヘッダーを確認できる。既定では無効（`404` を返す）。 |
+| `SKIP_AUTH_ROUTES` | | — | 認証をスキップしてアップストリームへ直接転送するルート。形式: リクエストパスにマッチする `[METHOD=]REGEX` パターンをカンマ区切りで列挙。例: `GET=^/health$,^/public/`。転送前に認証ヘッダーは除去される。 |
+| `IDP_SELECT_ICONS` | | `simple` | `/.auth/login/select` 画面のアイコンスタイル。`simple` — Simple Icons CDN のロゴ。`generic` — 汎用 ID カードアイコン（完全オフライン対応）。`text` — アイコンなし、テキストのみ。 |
+| `VERBOSE` | | `false` | 起動時にシークレットをマスクした全設定値を出力するか。`--verbose` / `-v` CLI フラグと同等。 |
+
+※ `SAMPLE_APP_PORT` を変更している場合、`APP_UPSTREAM` 未設定時の規定値は `http://localhost:<SAMPLE_APP_PORT>` になります。
+
+既定 IdP の選択ルール:
+
+- `DEFAULT_IDP` が設定されている場合、`/.auth/login` はその IdP へリダイレクトします。
+- `DEFAULT_IDP` が未設定かつ `IDP_LIST` が1件の場合、その1件を既定 IdP として扱います。
+- `DEFAULT_IDP` が未設定かつ `IDP_LIST` が複数件の場合、`/.auth/login` は IdP 選択画面を表示します。
+- `IDP_LIST` の順序は、選択画面の表示順にのみ使用されます。
+
+### IdP 個別設定
+
+`IDP_LIST` に含めた各 IdP に対して、`IDP_<NAME>_*` を設定します。
+
+| パラメーター | 必須 | 既定値 | 説明 |
+| --- | :---: | --- | --- |
+| `IDP_<NAME>_DISPLAY_NAME` | | IdP 名 | IdP 選択画面に表示する表示名。 |
+| `IDP_<NAME>_KIND` | | IdP 名から推定 | IdP のバックエンド種別。既知の IdP 名は自動検出（`entra` → `microsoft` など）、それ以外は `openid-connect` が既定。指定可能な値: `microsoft`（Entra ID / Microsoft account）、`google`、`apple`、`facebook`、`github`、`openid-connect`。 |
+| `IDP_<NAME>_CLIENT_ID` | ✓ | — | IdP に登録した OAuth2 / OIDC client ID。 |
+| `IDP_<NAME>_CLIENT_SECRET` | ✓ | — | IdP に登録した OAuth2 / OIDC client secret。 |
+| `IDP_<NAME>_OIDC_ISSUER_URL` | ✓ ※1 | ※2 | OIDC issuer URL。`microsoft`・`google`・`apple`・`openid-connect` の KIND で必須。 |
+| `IDP_<NAME>_AUTH_PROVIDER` | | KIND から推定 | `/.auth/me` の `identity_provider` フィールドおよび `X-MS-CLIENT-PRINCIPAL-IDP` ヘッダーの値（例: `microsoft` → `aad`）。 |
+| `IDP_<NAME>_AUTH_USER_ID_CLAIM` | | KIND から推定 | ユーザー ID として使用する JWT claim 名（例: `microsoft` → `preferred_username`、`google` → `email`）。 |
+| `IDP_<NAME>_SCOPES` | | `openid profile email` | リクエストする OAuth2 スコープ（スペース区切り）。委任アクセスシナリオでは追加スコープをここに記載。 |
+| `IDP_<NAME>_PROMPT` | | — | 認証リクエストごとに送る OIDC `prompt` パラメーター（`login` / `select_account` / `consent`）。OIDC 以外には無効。 |
+| `IDP_<NAME>_LOGOUT_ENDPOINT` | | KIND から導出 | IdP ログアウト URL。`microsoft` KIND は OIDC issuer URL から自動導出。 |
+| `IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL` | | `microsoft`: `true`、その他: `false` | OIDC userinfo からの claim 取得をスキップするか。`true` にすると userinfo レスポンスが ID token の claim を上書きしない。 |
+
+※1 `microsoft`・`google`・`apple`・`openid-connect` KIND の場合のみ必須。
+
+※2 `IDP_<NAME>_OIDC_ISSUER_URL` の KIND 別既定値:
+
+| KIND | 既定値 |
+| --- | --- |
+| `microsoft` | `https://login.microsoftonline.com/common/v2.0`（Entra ID ではテナント固有 URL を推奨） |
+| `google` | `https://accounts.google.com` |
+| `apple` | `https://appleid.apple.com` |
+| `openid-connect` | — （必須） |
+
+### oauth2-proxy 設定
+
+| パラメーター | 必須 | 既定値 | 説明 |
+| --- | :---: | --- | --- |
+| `OAUTH2_PROXY_COOKIE_SECRET` | | 自動生成 | oauth2-proxy のセッション cookie 署名シークレット。未設定時は起動時に自動生成して `config.toml` に追記保存される。再起動後も同じ値が使われる。 |
+| `OAUTH2_PROXY_COOKIE_SECURE` | | `false` | セッション cookie に `Secure` フラグを付与するか。HTTPS 配備時は `true` に設定。 |
+| `OAUTH2_PROXY_PORT_BASE` | | `4180` | 内部 oauth2-proxy インスタンスのベースポート。各 IdP はこの値から連番でポートを使用（例: `4180`、`4181`、…）。 |
+| `OAUTH2_PROXY_WHITELIST_DOMAIN` | | `SITE_URL`/`SITE_PORT` から導出 | リダイレクト先として許可するドメイン。 |
+| `OAUTH2_PROXY_STANDARD_LOGGING` | | `false` | oauth2-proxy の起動・終了メッセージをターミナルに表示するか。 |
+| `OAUTH2_PROXY_AUTH_LOGGING` | | `false` | oauth2-proxy の認証イベントログをターミナルに表示するか。 |
+| `OAUTH2_PROXY_REQUEST_LOGGING` | | `false` | oauth2-proxy のリクエストごとの HTTP ログをターミナルに表示するか。 |
+| `OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR` | | `false` | OIDC エラー時（client ID・issuer URL の設定ミスなど）に詳細情報を表示するか。開発時に便利。本番環境では非推奨。 |
+| `OAUTH2_PROXY_PLATFORM` | | 自動検出 | バイナリダウンロード対象のプラットフォーム。自動検出できない環境のみ設定が必要。指定可能な値: `windows-amd64`、`windows-arm64`、`linux-amd64`、`linux-arm64`、`linux-arm`、`darwin-amd64`、`darwin-arm64`。 |
+| `OAUTH2_PROXY_VERSION` | | latest | ダウンロード・維持するバージョンタグ（例: `v7.6.0`）。未設定時は最新安定版（prerelease 除く）。バイナリが存在しバージョンが一致する場合は何もしない。 |
+| `OAUTH2_PROXY_AUTO_UPDATE` | | `false` | `true` にすると起動時に自動更新。`false` でも新バージョンがあれば通知。ネットワーク不可の場合はスキップして起動続行。 |
+
+起動時に `bin/oauth2-proxy/oauth2-proxy[.exe]` が存在しない場合、GitHub Releases から自動的にダウンロードします。バイナリが存在する場合は常にバージョンチェックを行い、最新でなければ通知します。
+
+バージョン管理の動作まとめ:
+
+| 状態 | 動作 |
+| --- | --- |
+| バイナリなし | ダウンロード（`OAUTH2_PROXY_VERSION` 指定時はそのバージョン、未設定時は latest） |
+| バイナリあり・バージョン固定・不一致 | 指定バージョンへ更新 |
+| バイナリあり・`AUTO_UPDATE = true` | latest（または固定バージョン）と比較し、差異があれば更新 |
+| バイナリあり・`AUTO_UPDATE = false`（既定） | チェックのみ実行し、新しいバージョンがあれば通知（更新しない） |
+| バージョンチェック時にネットワーク不可 | チェックをスキップして起動続行 |
+
+### ネットワーク / SSL 設定
+
+| パラメーター | 必須 | 既定値 | 説明 |
+| --- | :---: | --- | --- |
+| `SSL_CA_BUNDLE` | | — | カスタム CA 証明書バンドル（PEM 形式）のパス。通常は不要 — [truststore](https://github.com/sethmlarson/truststore) によって OS の証明書ストア（Windows・macOS・Linux）が自動的に参照されます。OS のトラストストアに必要な CA が登録できない場合（例: ルート権限のない Linux 環境）にのみ設定してください。 |
+
+### 動作確認用アプリ設定
+
+動作確認用アプリ（`src/sample_app.py`）の設定です。`SAMPLE_APP_ENABLED = true` を指定した場合のみ起動します。
+
+| パラメーター | 必須 | 既定値 | 説明 |
+| --- | :---: | --- | --- |
+| `SAMPLE_APP_ENABLED` | | `false` | sample_app.py を動作確認用アプリとして起動するか。 |
+| `SAMPLE_APP_PORT` | | `8081` | sample_app.py の内部ポート。`APP_UPSTREAM` にこの値を設定するとリクエストを sample_app へ転送できる。 |
+| `SAMPLE_APP_STORAGE_BLOB_URL` | | — | 委任ストレージアクセスの検証に使用する Azure Blob Storage URL。形式: `https://<account>.blob.core.windows.net/<container>/<blob>`。 |
+| `SAMPLE_APP_OBO_STORAGE_SCOPE` | | `https://storage.azure.com/.default` | ストレージアクセス token リクエスト時に使用する OBO スコープ。 |
+| `SAMPLE_APP_STORAGE_TIMEOUT_SECONDS` | | `10` | ストレージリクエストのタイムアウト秒数。 |
+| `SAMPLE_APP_STORAGE_PREVIEW_BYTES` | | `4096` | ストレージレスポンスのプレビューバイト数。 |
+| `SAMPLE_APP_TITLE` | | `Easy Auth verification app` | sample_app の UI に表示するタイトル。 |
+| `SAMPLE_APP_DESCRIPTION` | | — | sample_app の UI に表示する説明。 |
+
+## トラブルシューティング
+
+### `invalid_client` でログインが失敗する
+
+`IDP_<NAME>_CLIENT_ID` と `IDP_<NAME>_CLIENT_SECRET` が IdP のアプリ登録と一致しているか確認してください。
+
+### IdP リダイレクト後にログインが失敗する（`AADSTS50011`）
+
+リダイレクト URI の不一致です。IdP のアプリ登録（Authentication）のリダイレクト URI を次と一致させてください:
+
+```text
+<SITE_URL>:<SITE_PORT>/oauth2/callback
+```
+
+例: `http://localhost:8080/oauth2/callback`
+
+### アプリに到達できない（502 エラー）
+
+`APP_UPSTREAM` が正しく設定されているか、アプリケーションがその URL で起動しているか確認してください。
+
+### ヘッダーの内容を確認したい
+
+`config.toml` で `DEBUG_HEADERS_ENDPOINT_ENABLED = true` を設定すると、`GET /.debug/headers` エンドポイントでエミュレーターが計算したヘッダーを確認できます。
+
+### oauth2-proxy のログを確認したい
+
+`OAUTH2_PROXY_STANDARD_LOGGING`・`OAUTH2_PROXY_AUTH_LOGGING`・`OAUTH2_PROXY_REQUEST_LOGGING` のいずれか（または複数）を `true` に設定すると、対応するログカテゴリがターミナルに表示されます。
+
+OIDC 設定ミスのエラー詳細を確認したい場合は `OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR = true` を設定してください。
+
+なお、oauth2-proxy が予期せず終了した場合の起動エラーはこれらの設定に関わらず常に表示されます。

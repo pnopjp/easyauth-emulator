@@ -1,0 +1,10 @@
+config.toml
+bin/
+run/
+build/
+dist/
+__pycache__/
+*.pyc
+__*/
+!vscode-extension/tests/__mocks__/
+!vscode-extension/tests/__mocks__/**
