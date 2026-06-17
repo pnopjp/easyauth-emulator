@@ -38,18 +38,19 @@
 | パラメーター | 必須 | 既定値 | 説明 |
 | --- | :---: | --- | --- |
 | `IDP_<NAME>_DISPLAY_NAME` | | IdP 名 | IdP 選択画面に表示する表示名。 |
-| `IDP_<NAME>_KIND` | | IdP 名から推定 | IdP のバックエンド種別。既知の IdP 名は自動検出（`entra` → `microsoft` など）、それ以外は `openid-connect` が既定。指定可能な値: `microsoft`（Entra ID / Microsoft account）、`google`、`apple`、`facebook`、`github`、`openid-connect`。 |
+| `IDP_<NAME>_KIND` | | IdP 名から推定 | IdP のバックエンド種別。既知の IdP 名は自動検出（`entra` → `microsoft` など）、それ以外は `oidc` が既定。指定可能な値: `microsoft`（Entra ID / Microsoft account）、`google`、`apple`、`facebook`、`github`、`oidc`（エイリアス: `openid-connect`）。 |
 | `IDP_<NAME>_CLIENT_ID` | ✓ | — | IdP に登録した OAuth2 / OIDC client ID。 |
 | `IDP_<NAME>_CLIENT_SECRET` | ✓ | — | IdP に登録した OAuth2 / OIDC client secret。 |
-| `IDP_<NAME>_OIDC_ISSUER_URL` | ✓ ※1 | ※2 | OIDC issuer URL。`microsoft`・`google`・`apple`・`openid-connect` の KIND で必須。 |
+| `IDP_<NAME>_OIDC_ISSUER_URL` | ✓ ※1 | ※2 | OIDC issuer URL。`microsoft`・`google`・`apple`・`oidc` の KIND で必須。 |
 | `IDP_<NAME>_AUTH_PROVIDER` | | KIND から推定 | `/.auth/me` の `identity_provider` フィールドおよび `X-MS-CLIENT-PRINCIPAL-IDP` ヘッダーの値（例: `microsoft` → `aad`）。 |
 | `IDP_<NAME>_AUTH_USER_ID_CLAIM` | | KIND から推定 | ユーザー ID として使用する JWT claim 名（例: `microsoft` → `preferred_username`、`google` → `email`）。 |
 | `IDP_<NAME>_SCOPES` | | `openid profile email` | リクエストする OAuth2 スコープ（スペース区切り）。委任アクセスシナリオでは追加スコープをここに記載。 |
 | `IDP_<NAME>_PROMPT` | | — | 認証リクエストごとに送る OIDC `prompt` パラメーター（`login` / `select_account` / `consent`）。OIDC 以外には無効。 |
+| `IDP_<NAME>_CODE_CHALLENGE_METHOD` | | `microsoft`/`google`/`apple`: `S256`、その他: — | PKCE のコードチャレンジ方式（`S256` または `plain`）。`microsoft`・`google`・`apple` はこの設定に関わらず常に `S256` を使用。`oidc` KIND で IdP が PKCE に対応している場合は `S256` を設定。OIDC 以外には無効。 |
 | `IDP_<NAME>_LOGOUT_ENDPOINT` | | KIND から導出 | IdP ログアウト URL。`microsoft` KIND は OIDC issuer URL から自動導出。 |
 | `IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL` | | `microsoft`: `true`、その他: `false` | OIDC userinfo からの claim 取得をスキップするか。`true` にすると userinfo レスポンスが ID token の claim を上書きしない。 |
 
-※1 `microsoft`・`google`・`apple`・`openid-connect` KIND の場合のみ必須。
+※1 `microsoft`・`google`・`apple`・`oidc` KIND の場合のみ必須。
 
 ※2 `IDP_<NAME>_OIDC_ISSUER_URL` の KIND 別既定値:
 
@@ -58,7 +59,7 @@
 | `microsoft` | `https://login.microsoftonline.com/common/v2.0`（Entra ID ではテナント固有 URL を推奨） |
 | `google` | `https://accounts.google.com` |
 | `apple` | `https://appleid.apple.com` |
-| `openid-connect` | — （必須） |
+| `oidc` | — （必須） |
 
 ### oauth2-proxy 設定
 
@@ -68,6 +69,7 @@
 | `OAUTH2_PROXY_COOKIE_SECURE` | | `false` | セッション cookie に `Secure` フラグを付与するか。HTTPS 配備時は `true` に設定。 |
 | `OAUTH2_PROXY_PORT_BASE` | | `4180` | 内部 oauth2-proxy インスタンスのベースポート。各 IdP はこの値から連番でポートを使用（例: `4180`、`4181`、…）。 |
 | `OAUTH2_PROXY_WHITELIST_DOMAIN` | | `SITE_URL`/`SITE_PORT` から導出 | リダイレクト先として許可するドメイン。 |
+| `OAUTH2_PROXY_TRUSTED_PROXY_IP` | | `APP_UPSTREAM` が localhost の場合 `127.0.0.1,::1` | `X-Forwarded-*` ヘッダーを信頼するリバースプロキシの IP アドレスまたは CIDR（カンマ区切り）。`APP_UPSTREAM` が `localhost`・`127.0.0.1`・`[::1]` を指している場合は自動的に `127.0.0.1,::1` を設定。Docker などローカル以外の環境では明示的に指定（例: `172.17.0.0/16`）。 |
 | `OAUTH2_PROXY_STANDARD_LOGGING` | | `false` | oauth2-proxy の起動・終了メッセージをターミナルに表示するか。 |
 | `OAUTH2_PROXY_AUTH_LOGGING` | | `false` | oauth2-proxy の認証イベントログをターミナルに表示するか。 |
 | `OAUTH2_PROXY_REQUEST_LOGGING` | | `false` | oauth2-proxy のリクエストごとの HTTP ログをターミナルに表示するか。 |
@@ -128,6 +130,31 @@
 ### アプリに到達できない（502 エラー）
 
 `APP_UPSTREAM` が正しく設定されているか、アプリケーションがその URL で起動しているか確認してください。
+
+### oauth2-proxy が HTTP 500 を返す
+
+いくつかの原因が考えられます。
+
+#### 1. クライアントシークレットが間違っている
+
+`IDP_<NAME>_CLIENT_SECRET` に設定する値は、シークレットの**値**であり、シークレットの ID（オブジェクト ID）ではありません。
+
+診断するには、以下のいずれかを有効にしてください:
+
+- **`OAUTH2_PROXY_STANDARD_LOGGING = true`**: Output に詳細なエラーメッセージが出力されます。例:
+
+  ```text
+  [oauthproxy.go:928] Error redeeming code during OAuth2 callback: token exchange failed: oauth2: "invalid_client" "AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID, for a secret added to app '<app-id>'."
+  ```
+
+- **`OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR = true`**: ブラウザに 500 エラー画面とエラー詳細が表示されます。例:
+
+  ```text
+  500
+  Internal Server Error
+
+  token exchange failed: oauth2: "invalid_client" "AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID, for a secret added to app '<app-id>'."
+  ```
 
 ### ヘッダーの内容を確認したい
 

@@ -364,6 +364,11 @@
                   "type": "string",
                   "description": "IDP_<NAME>_PROMPT: OIDC prompt parameter (e.g. 'login', 'consent')."
                 },
+                "codeChallengeMethod": {
+                  "type": "string",
+                  "enum": ["S256", "plain", ""],
+                  "description": "IDP_<NAME>_CODE_CHALLENGE_METHOD: PKCE code challenge method. Set to 'S256' when the IdP supports it. Applies to oidc kind only."
+                },
                 "logoutEndpoint": {
                   "type": "string",
                   "description": "IDP_<NAME>_LOGOUT_ENDPOINT: Override the IDP logout URL."
@@ -437,6 +442,13 @@
             "scope": "resource",
             "order": 8,
             "markdownDescription": "`SSL_CA_BUNDLE`: Path to a custom CA certificate bundle (PEM format). Normally not needed — the OS certificate store (Windows, macOS, Linux) is used automatically. Set this only when the required CA is not in the OS trust store, for example on Linux systems where the corporate CA cannot be added to the system store."
+          },
+          "easyauth.oauth2proxy.trustedProxyIp": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 9,
+            "markdownDescription": "`OAUTH2_PROXY_TRUSTED_PROXY_IP`: Comma-separated list of trusted reverse-proxy IP addresses or CIDRs from which `X-Forwarded-*` headers are accepted. Auto-set to `127.0.0.1,::1` when `APP_UPSTREAM` points to localhost. Set explicitly for non-local setups such as Docker (e.g. `172.17.0.0/16`)."
           }
         }
       }

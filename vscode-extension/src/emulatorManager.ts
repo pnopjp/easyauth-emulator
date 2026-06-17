@@ -17,7 +17,7 @@ export class EmulatorManager implements vscode.Disposable {
 
     constructor(
         private readonly context: vscode.ExtensionContext,
-        private readonly outputChannel: vscode.OutputChannel,
+        private readonly outputChannel: vscode.LogOutputChannel,
         private readonly statusBar: StatusBarManager,
         private readonly secretManager: SecretManager,
     ) {
@@ -59,18 +59,21 @@ export class EmulatorManager implements vscode.Disposable {
         }
 
         if (!this.hasConfig()) {
-            this.outputChannel.appendLine('[extension] Config file not found. Create .vscode/easyauth.json in the workspace root, or configure IDP settings.');
+            this.outputChannel.warn('[extension] Config file not found. Create .vscode/easyauth.json in the workspace root, or configure IDP settings.');
             this.setState('unconfigured');
             return;
         }
+
+        const secretsOk = await this.secretManager.promptForMissingSecrets(this.outputChannel);
+        if (!secretsOk) return;
 
         const { cmd, cmdArgs } = this.buildArgs(resolved);
         this.sessionId = sessionId;
         this.currentPort = port;
         this.setState('starting');
 
-        this.outputChannel.appendLine(`[extension] Starting EasyAuth Emulator on upstream port ${port}`);
-        this.outputChannel.appendLine(`[extension] $ ${cmd} ${cmdArgs.join(' ')}`);
+        this.outputChannel.info(`[extension] Starting EasyAuth Emulator on upstream port ${port}`);
+        this.outputChannel.info(`[extension] $ ${cmd} ${cmdArgs.join(' ')}`);
 
         try {
             const env = await this.buildEnv(port);
@@ -82,17 +85,34 @@ export class EmulatorManager implements vscode.Disposable {
             });
             this.process = proc;
 
+            let stdoutBuf = '';
             proc.stdout?.on('data', (data: Buffer) => {
-                const text = data.toString();
-                this.outputChannel.append(text);
-                if (this.state === 'starting' && text.includes(STARTED_MARKER)) {
-                    this.clearStartTimeout();
-                    this.setState('running');
+                stdoutBuf += data.toString();
+                const lines = stdoutBuf.split(/\r?\n/);
+                stdoutBuf = lines.pop() ?? '';
+                for (const line of lines) {
+                    if (/\] Error /.test(line)) {
+                        this.outputChannelError(line);
+                    } else if (/\] (Warning|WARNING): /.test(line)) {
+                        this.outputChannel.warn(line);
+                    } else {
+                        this.outputChannel.appendLine(line);
+                    }
+                    if (this.state === 'starting' && line.includes(STARTED_MARKER)) {
+                        this.clearStartTimeout();
+                        this.setState('running');
+                    }
                 }
             });
 
+            let stderrBuf = '';
             proc.stderr?.on('data', (data: Buffer) => {
-                this.outputChannel.append(data.toString());
+                stderrBuf += data.toString();
+                const lines = stderrBuf.split(/\r?\n/);
+                stderrBuf = lines.pop() ?? '';
+                for (const line of lines) {
+                    this.outputChannelError(line);
+                }
             });
 
             proc.on('exit', (code) => {
@@ -116,7 +136,7 @@ export class EmulatorManager implements vscode.Disposable {
                 // Ignore stale error events from a process that was already replaced
                 if (this.process !== proc) { return; }
                 this.clearStartTimeout();
-                this.outputChannel.appendLine(`[extension] Spawn error: ${err.message}`);
+                this.outputChannelError(`[extension] Spawn error: ${err.message}`);
                 this.setState('error');
                 this.process = null;
                 this.sessionId = null;
@@ -125,7 +145,7 @@ export class EmulatorManager implements vscode.Disposable {
 
             this.startTimeout = setTimeout(() => {
                 if (this.state === 'starting') {
-                    this.outputChannel.appendLine(
+                    this.outputChannelError(
                         `[extension] Startup timeout: "${STARTED_MARKER}" not detected within 30 s`
                     );
                     this.setState('error');
@@ -133,7 +153,7 @@ export class EmulatorManager implements vscode.Disposable {
                 }
             }, STARTUP_TIMEOUT_MS);
         } catch (err) {
-            this.outputChannel.appendLine(`[extension] Error: ${err}`);
+            this.outputChannelError(`[extension] Error: ${err}`);
             this.setState('error');
             this.sessionId = null;
             this.currentPort = null;
@@ -143,7 +163,7 @@ export class EmulatorManager implements vscode.Disposable {
     async stop(): Promise<void> {
         this.clearStartTimeout();
         if (this.process) {
-            this.outputChannel.appendLine('[extension] Stopping EasyAuth Emulator');
+            this.outputChannel.info('[extension] Stopping EasyAuth Emulator');
             const pid = this.process.pid;
             this.process = null;
             if (process.platform === 'win32' && pid !== undefined) {
@@ -221,7 +241,7 @@ export class EmulatorManager implements vscode.Disposable {
             const configPath = path.join(wsRoot, '.vscode', 'easyauth.toml');
             extraArgs.push('--config', configPath);
             if (fs.existsSync(configPath)) {
-                this.outputChannel.appendLine(`[extension] Using config: ${configPath}`);
+                this.outputChannel.info(`[extension] Using config: ${configPath}`);
             }
         }
 
@@ -281,7 +301,7 @@ export class EmulatorManager implements vscode.Disposable {
             if (!clientId) continue;
             const clientSecret = await this.secretManager.get(idpName);
             if (!clientSecret) {
-                this.outputChannel.appendLine(`[extension] Warning: ${idpName} clientId is set but no client secret found — run "EasyAuth Emulator: Set Client Secret"`);
+                this.outputChannel.warn(`[extension] Warning: ${idpName} clientId is set but no client secret found — run "EasyAuth Emulator: Set Client Secret"`);
                 continue;
             }
             idpList.push(idpName);
@@ -311,6 +331,7 @@ export class EmulatorManager implements vscode.Disposable {
             authProvider?: string;
             authUserIdClaim?: string;
             prompt?: string;
+            codeChallengeMethod?: string;
             logoutEndpoint?: string;
             skipClaimsFromProfileUrl?: boolean;
         }
@@ -320,7 +341,7 @@ export class EmulatorManager implements vscode.Disposable {
             if (!name || !idp.clientId?.trim()) continue;
             const clientSecret = await this.secretManager.get(`custom:${name}`);
             if (!clientSecret) {
-                this.outputChannel.appendLine(`[extension] Warning: custom IDP '${name}' clientId is set but no client secret found — run "EasyAuth Emulator: Set Client Secret"`);
+                this.outputChannel.warn(`[extension] Warning: custom IDP '${name}' clientId is set but no client secret found — run "EasyAuth Emulator: Set Client Secret"`);
                 continue;
             }
             idpList.push(name);
@@ -333,6 +354,7 @@ export class EmulatorManager implements vscode.Disposable {
             if (idp.authProvider?.trim()) extra[`IDP_${envKey}_AUTH_PROVIDER`] = idp.authProvider.trim();
             if (idp.authUserIdClaim?.trim()) extra[`IDP_${envKey}_AUTH_USER_ID_CLAIM`] = idp.authUserIdClaim.trim();
             if (idp.prompt?.trim()) extra[`IDP_${envKey}_PROMPT`] = idp.prompt.trim();
+            if (idp.codeChallengeMethod?.trim()) extra[`IDP_${envKey}_CODE_CHALLENGE_METHOD`] = idp.codeChallengeMethod.trim();
             if (idp.logoutEndpoint?.trim()) extra[`IDP_${envKey}_LOGOUT_ENDPOINT`] = idp.logoutEndpoint.trim();
             if (idp.skipClaimsFromProfileUrl) extra[`IDP_${envKey}_SKIP_CLAIMS_FROM_PROFILE_URL`] = 'true';
         }
@@ -352,11 +374,18 @@ export class EmulatorManager implements vscode.Disposable {
         if (oauth2.get<boolean>('autoUpdate', false)) extra['OAUTH2_PROXY_AUTO_UPDATE'] = 'true';
         const sslCaBundle = oauth2.get<string>('sslCaBundle', '').trim();
         if (sslCaBundle) extra['SSL_CA_BUNDLE'] = sslCaBundle;
+        const trustedProxyIp = oauth2.get<string>('trustedProxyIp', '').trim();
+        if (trustedProxyIp) extra['OAUTH2_PROXY_TRUSTED_PROXY_IP'] = trustedProxyIp;
 
         // Cookie secret: generate once and persist per workspace in SecretStorage (encrypted)
         extra['OAUTH2_PROXY_COOKIE_SECRET'] = await this.secretManager.getCookieSecret();
 
         return { ...process.env, ...extra };
+    }
+
+    private outputChannelError(message: string): void {
+        this.outputChannel.error(message);
+        this.outputChannel.show(true);
     }
 
     private workspaceRoot(): string | undefined {
