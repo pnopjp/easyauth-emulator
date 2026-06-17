@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 245" width="780" height="245" font-family="'Yu Gothic UI', 'Meiryo', 'Hiragino Sans', 'Segoe UI', Arial, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#555"/>
+    </marker>
+  </defs>
+
+  <!-- ブラウザ (center y=130) -->
+  <rect x="10" y="25" width="120" height="50" rx="6" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="70" y="54" text-anchor="middle" font-size="14" fill="#1a1a1a">ブラウザ</text>
+
+  <!-- EasyAuth Emulator (center y=130, top=90, bottom=170) -->
+  <rect x="200" y="10" width="250" height="80" rx="6" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="325" y="44" text-anchor="middle" font-size="14" font-weight="bold" fill="#1a1a1a">EasyAuth Emulator</text>
+  <text x="325" y="64" text-anchor="middle" font-size="12" fill="#555">ポート 8080（変更可能）</text>
+
+  <!-- あなたのアプリ (center y=130) -->
+  <rect x="575" y="25" width="185" height="50" rx="6" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="667" y="46" text-anchor="middle" font-size="13" fill="#1a1a1a">あなたのアプリ</text>
+  <text x="667" y="63" text-anchor="middle" font-size="11" fill="#555">ポート自動検出</text>
+
+  <!-- IdP -->
+  <rect x="225" y="165" width="200" height="60" rx="6" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="325" y="192" text-anchor="middle" font-size="14" fill="#1a1a1a">IdP</text>
+  <text x="325" y="210" text-anchor="middle" font-size="11" fill="#555">（Entra ID / Google / ...）</text>
+
+  <!-- Arrow: ブラウザ → Emulator at y=130 -->
+  <line x1="130" y1="50" x2="199" y2="50" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="164" y="40" text-anchor="middle" font-size="11" fill="#555">リクエスト</text>
+
+  <!-- Arrow: Emulator → あなたのアプリ at y=130; labels above the line -->
+  <line x1="450" y1="50" x2="574" y2="50" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="512" y="27" text-anchor="middle" font-size="11" fill="#555">認証済み +</text>
+  <text x="512" y="40" text-anchor="middle" font-size="11" fill="#555">Easy Auth ヘッダー</text>
+
+  <!-- Arrow: Emulator → IdP (down, left side) -->
+  <line x1="315" y1="90" x2="315" y2="164" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="310" y="123" text-anchor="end" font-size="11" fill="#555">リダイレクト</text>
+  <text x="310" y="137" text-anchor="end" font-size="11" fill="#555">（未認証）</text>
+
+  <!-- Arrow: IdP → Emulator (up, right side) -->
+  <line x1="335" y1="164" x2="335" y2="92" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="340" y="123" text-anchor="start" font-size="11" fill="#555">OAuth2</text>
+  <text x="340" y="137" text-anchor="start" font-size="11" fill="#555">コールバック</text>
+</svg>

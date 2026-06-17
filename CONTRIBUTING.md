@@ -218,3 +218,31 @@ The `npm run package` script copies the binary from `../dist/easyauth-emulator/`
 
 - Do not commit `node_modules/` or `out/` (both are in `.gitignore`).
 - Official VSIX artifacts are built by GitHub Actions; do not treat locally built packages as release artifacts.
+
+### README Diagram Images
+
+The diagram images in the extension README are generated from SVG source files. Edit the SVG first, then regenerate the PNGs with [ImageMagick](https://imagemagick.org/). Run commands from the repository root.
+
+```powershell
+magick -background white vscode-extension/images/flow.svg    -resize 740x -flatten vscode-extension/images/flow.png
+magick -background white vscode-extension/images/flow_ja.svg -resize 780x -flatten vscode-extension/images/flow_ja.png
+```
+
+---
+
+## Icon Assets
+
+The source icon is `assets/icon.svg`. Use [ImageMagick](https://imagemagick.org/) to regenerate the derived files. Run all commands from the repository root.
+
+**exe icon** (`assets/icon.ico`):
+
+```powershell
+magick -background none assets/icon.svg -resize 512x512 -gravity center -extent 512x512 assets/icon.png
+magick assets/icon.png -define icon:auto-resize=256,128,64,48,32,24,16 assets/icon.ico
+```
+
+**VS Code extension icon** (`vscode-extension/images/icon.png`):
+
+```powershell
+magick -background none assets/icon.svg -resize 256x256 -gravity center -extent 256x256 vscode-extension/images/icon.png
+```

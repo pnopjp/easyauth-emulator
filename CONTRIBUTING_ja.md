@@ -217,3 +217,31 @@ npm run package
 
 - `node_modules/` および `out/` はコミットしないでください（いずれも `.gitignore` に含まれています）。
 - 公式 VSIX 成果物は GitHub Actions によってビルドされます。ローカルビルドのパッケージをリリース成果物として扱わないでください。
+
+### README ダイアグラム画像
+
+拡張機能 README に掲載しているダイアグラム画像は SVG ソースファイルから生成します。SVG を編集した後、[ImageMagick](https://imagemagick.org/) で PNG を再生成してください。コマンドはリポジトリルートから実行してください。
+
+```powershell
+magick -background white vscode-extension/images/flow.svg    -resize 740x -flatten vscode-extension/images/flow.png
+magick -background white vscode-extension/images/flow_ja.svg -resize 780x -flatten vscode-extension/images/flow_ja.png
+```
+
+---
+
+## アイコン素材
+
+アイコンのソースファイルは `assets/icon.svg` です。派生ファイルの再生成には [ImageMagick](https://imagemagick.org/) を使用します。コマンドはすべてリポジトリルートから実行してください。
+
+**exe 用アイコン**（`assets/icon.ico`）:
+
+```powershell
+magick -background none assets/icon.svg -resize 512x512 -gravity center -extent 512x512 assets/icon.png
+magick assets/icon.png -define icon:auto-resize=256,128,64,48,32,24,16 assets/icon.ico
+```
+
+**VS Code 拡張機能用アイコン**（`vscode-extension/images/icon.png`）:
+
+```powershell
+magick -background none assets/icon.svg -resize 256x256 -gravity center -extent 256x256 vscode-extension/images/icon.png
+```
