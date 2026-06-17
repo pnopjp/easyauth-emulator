@@ -301,15 +301,16 @@ def _ensure_cookie_secret(env: dict[str, str], config_file: Path) -> None:
 # IDP processing
 # ---------------------------------------------------------------------------
 
-# (kind, default_issuer, default_auth_provider, default_claim, skip_claims_default)
-_KIND_DEFAULTS: dict[str, tuple[str, str, str, str, bool]] = {
-    "microsoft":    ("oidc", "https://login.microsoftonline.com/common/v2.0", "aad",      "preferred_username", True),
-    "apple":        ("oidc", "https://appleid.apple.com",                     "apple",    "email",              False),
-    "google":       ("oidc", "https://accounts.google.com",                   "google",   "email",              False),
-    "openid-connect":("oidc","",                                               "oidc",     "sub",                False),
-    "oidc":         ("oidc", "",                                               "oidc",     "sub",                False),
-    "facebook":     ("facebook", "",                                           "facebook", "id",                 False),
-    "github":       ("github",   "",                                           "github",   "login",              False),
+# (kind, default_issuer, default_auth_provider, default_claim, skip_claims_default, default_code_challenge_method)
+# microsoft/google/apple always use S256; generic OIDC leaves it empty (configurable); non-OIDC providers omit it.
+_KIND_DEFAULTS: dict[str, tuple[str, str, str, str, bool, str]] = {
+    "microsoft":     ("oidc",     "https://login.microsoftonline.com/common/v2.0", "aad",      "preferred_username", True,  "S256"),
+    "apple":         ("oidc",     "https://appleid.apple.com",                     "apple",    "email",              False, "S256"),
+    "google":        ("oidc",     "https://accounts.google.com",                   "google",   "email",              False, "S256"),
+    "openid-connect":("oidc",     "",                                               "oidc",     "sub",                False, ""),
+    "oidc":          ("oidc",     "",                                               "oidc",     "sub",                False, ""),
+    "facebook":      ("facebook", "",                                               "facebook", "id",                 False, ""),
+    "github":        ("github",   "",                                               "github",   "login",              False, ""),
 }
 
 _IDP_DEFAULT_KIND: dict[str, str] = {
@@ -327,12 +328,12 @@ def _process_idp(env: dict, idp: str, port: int,
     up_idp = idp.upper().replace("-", "_")
     pfx = f"IDP_{up_idp}"
 
-    idp_kind = _get(env, f"{pfx}_KIND", "").lower() or _IDP_DEFAULT_KIND.get(idp, "openid-connect")
+    idp_kind = _get(env, f"{pfx}_KIND", "").lower() or _IDP_DEFAULT_KIND.get(idp, "oidc")
 
     if idp_kind not in _KIND_DEFAULTS:
         _die(f"Unsupported IDP kind for {idp}: {idp_kind}")
 
-    oauth_provider_type, default_issuer, default_auth_provider, default_claim, default_skip = \
+    oauth_provider_type, default_issuer, default_auth_provider, default_claim, default_skip, default_pkce = \
         _KIND_DEFAULTS[idp_kind]
 
     issuer_url    = _get(env, f"{pfx}_OIDC_ISSUER_URL", default_issuer)
@@ -342,6 +343,8 @@ def _process_idp(env: dict, idp: str, port: int,
     user_id_claim = _get(env, f"{pfx}_AUTH_USER_ID_CLAIM", default_claim)
     scopes        = _get(env, f"{pfx}_SCOPES", "openid profile email")
     prompt        = _get(env, f"{pfx}_PROMPT", "")
+    # Known providers (microsoft/google/apple) use hardcoded S256; generic OIDC allows config override.
+    code_challenge_method = default_pkce or _get(env, f"{pfx}_CODE_CHALLENGE_METHOD", "")
     skip_raw      = _get(env, f"{pfx}_SKIP_CLAIMS_FROM_PROFILE_URL", "")
     skip_claims   = (skip_raw.lower() == "true") if skip_raw else default_skip
 
@@ -384,6 +387,8 @@ def _process_idp(env: dict, idp: str, port: int,
         args.append(f"--oidc-issuer-url={issuer_url}")
         if prompt:
             args.append(f"--prompt={prompt}")
+        if code_challenge_method:
+            args.append(f"--code-challenge-method={code_challenge_method}")
 
     return {
         "args": args,
@@ -771,6 +776,18 @@ def main() -> None:
 
     whitelist_domain = _get(env, "OAUTH2_PROXY_WHITELIST_DOMAIN", default_whitelist)
 
+    # ---- Trusted proxy IPs for --reverse-proxy --------------------------------
+    # Default to localhost (IPv4 + IPv6) when APP_UPSTREAM points to any loopback address.
+    # Override with OAUTH2_PROXY_TRUSTED_PROXY_IP (comma-separated) for other setups (e.g. Docker).
+    _LOOPBACK_RE = re.compile(r"https?://(?:localhost|127\.0\.0\.1|\[::1\])(?:[:/]|$)")
+    trusted_proxy_ip_raw = _get(env, "OAUTH2_PROXY_TRUSTED_PROXY_IP", "")
+    if trusted_proxy_ip_raw:
+        trusted_proxy_ips = [ip.strip() for ip in trusted_proxy_ip_raw.split(",") if ip.strip()]
+    elif _LOOPBACK_RE.match(app_upstream):
+        trusted_proxy_ips = ["127.0.0.1", "::1"]
+    else:
+        trusted_proxy_ips = []
+
     # ---- Process each IDP -------------------------------------------------
     idp_configs: list[tuple[str, dict]] = []
 
@@ -785,6 +802,8 @@ def main() -> None:
 
         port = PORT_BASE + i
         cfg  = _process_idp(env, idp, port, base_site_url, whitelist_domain)
+        for ip in trusted_proxy_ips:
+            cfg["args"].append(f"--trusted-proxy-ip={ip}")
         idp_configs.append((idp, cfg))
 
     sample_app_enabled   = _get(env, "SAMPLE_APP_ENABLED",           "false").lower() == "true"

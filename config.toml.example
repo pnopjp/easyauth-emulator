@@ -60,6 +60,11 @@ OAUTH2_PROXY_COOKIE_SECURE = false
 # Defaults to host[:port] derived from SITE_URL/SITE_PORT when not set.
 # OAUTH2_PROXY_WHITELIST_DOMAIN = ""
 
+# Trusted reverse-proxy IP addresses (comma-separated IPs or CIDRs) for X-Forwarded-* headers.
+# Auto-set to "127.0.0.1,::1" when APP_UPSTREAM points to localhost or 127.0.0.1 or [::1].
+# Set explicitly for non-local setups such as Docker (e.g. "172.17.0.0/16").
+# OAUTH2_PROXY_TRUSTED_PROXY_IP = ""
+
 # oauth2-proxy log output (all default to false).
 # Errors on startup failure are always shown regardless of these settings.
 # OAUTH2_PROXY_STANDARD_LOGGING = false  # startup/shutdown messages
@@ -91,12 +96,12 @@ OAUTH2_PROXY_COOKIE_SECURE = false
 #   apple
 #   facebook
 #   github
-#   openid-connect
+#   oidc       — Generic OpenID Connect  (alias: openid-connect)
 
 # Per-IDP variable template — replace <NAME> with an ID from IDP_LIST.
 # IDP_<NAME>_DISPLAY_NAME = ""
-# IDP_<NAME>_KIND = ""               # microsoft | apple | facebook | github | google | openid-connect
-# IDP_<NAME>_OIDC_ISSUER_URL = ""    # required for microsoft, apple, google, openid-connect
+# IDP_<NAME>_KIND = ""               # microsoft | apple | facebook | github | google | oidc
+# IDP_<NAME>_OIDC_ISSUER_URL = ""    # required for microsoft, apple, google, oidc
 # IDP_<NAME>_CLIENT_ID = ""
 # IDP_<NAME>_CLIENT_SECRET = ""
 # IDP_<NAME>_AUTH_PROVIDER = ""      # defaults from KIND when omitted
@@ -104,6 +109,8 @@ OAUTH2_PROXY_COOKIE_SECURE = false
 # IDP_<NAME>_SCOPES = ""             # optional; default: openid profile email
 # IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL = false  # default: true for microsoft, false for others
 # IDP_<NAME>_PROMPT = ""             # optional: login | select_account | consent
+# IDP_<NAME>_CODE_CHALLENGE_METHOD = ""  # optional (oidc kind only): S256 | plain
+#                                        # microsoft/google/apple use S256 automatically
 # IDP_<NAME>_LOGOUT_ENDPOINT = ""    # optional; for microsoft, derived from OIDC_ISSUER_URL when omitted
 
 # --- Entra ID (enabled by IDP_LIST = "entra") --------------------------------
@@ -151,9 +158,9 @@ IDP_ENTRA_SCOPES = "openid profile email"
 # IDP_GITHUB_CLIENT_SECRET = ""
 # IDP_GITHUB_SCOPES = "read:user user:email"
 
-# --- Generic OpenID Connect --------------------------------------------------
+# --- Generic OIDC ------------------------------------------------------------
 # IDP_OPENID_CONNECT_DISPLAY_NAME = "OpenID Connect"
-# IDP_OPENID_CONNECT_KIND = "openid-connect"
+# IDP_OPENID_CONNECT_KIND = "oidc"
 # IDP_OPENID_CONNECT_OIDC_ISSUER_URL = ""
 # IDP_OPENID_CONNECT_CLIENT_ID = ""
 # IDP_OPENID_CONNECT_CLIENT_SECRET = ""

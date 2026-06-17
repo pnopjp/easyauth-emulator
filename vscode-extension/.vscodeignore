@@ -10,11 +10,10 @@ vitest.config.js.map
 package-lock.json
 README_ja.md
 node_modules/**
-out/**.js.map
+out/*.js.map
 *.vsix
 *.vsix.zip
 bin/easyauth-emulator/_internal/src/__pycache__/**
 bin/easyauth-emulator/_internal/config.toml.example
 bin/easyauth-emulator/_internal/bin/**
-images/flow**.svg
-images/flow_ja.png
+images/flow*.*

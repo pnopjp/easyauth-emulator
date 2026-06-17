@@ -38,18 +38,19 @@ Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`.
 | Parameter | Required | Default | Description |
 | --- | :---: | --- | --- |
 | `IDP_<NAME>_DISPLAY_NAME` | | IDP name | Label shown on the IdP selection page. |
-| `IDP_<NAME>_KIND` | | Inferred from IDP name | Identity provider backend type. Well-known names are auto-detected (`entra` → `microsoft`, etc.); others default to `openid-connect`. Accepted values: `microsoft` (Entra ID / Microsoft account), `google`, `apple`, `facebook`, `github`, `openid-connect`. |
+| `IDP_<NAME>_KIND` | | Inferred from IDP name | Identity provider backend type. Well-known names are auto-detected (`entra` → `microsoft`, etc.); others default to `oidc`. Accepted values: `microsoft` (Entra ID / Microsoft account), `google`, `apple`, `facebook`, `github`, `oidc` (alias: `openid-connect`). |
 | `IDP_<NAME>_CLIENT_ID` | ✓ | — | OAuth2 / OIDC client ID registered with the identity provider. |
 | `IDP_<NAME>_CLIENT_SECRET` | ✓ | — | OAuth2 / OIDC client secret registered with the identity provider. |
-| `IDP_<NAME>_OIDC_ISSUER_URL` | ✓ ※1 | ※2 | OIDC issuer URL. Required for `microsoft`, `google`, `apple`, and `openid-connect` KIND. |
+| `IDP_<NAME>_OIDC_ISSUER_URL` | ✓ ※1 | ※2 | OIDC issuer URL. Required for `microsoft`, `google`, `apple`, and `oidc` KIND. |
 | `IDP_<NAME>_AUTH_PROVIDER` | | Inferred from KIND | Value used as `identity_provider` in `/.auth/me` and `X-MS-CLIENT-PRINCIPAL-IDP` (e.g. `microsoft` → `aad`). |
 | `IDP_<NAME>_AUTH_USER_ID_CLAIM` | | Inferred from KIND | JWT claim used as the user ID (e.g. `microsoft` → `preferred_username`, `google` → `email`). |
 | `IDP_<NAME>_SCOPES` | | `openid profile email` | Space-separated OAuth2 scopes to request. Add extra scopes for delegated access scenarios. |
 | `IDP_<NAME>_PROMPT` | | — | OIDC `prompt` parameter sent on every authorization request (`login`, `select_account`, `consent`). No effect for non-OIDC providers. |
+| `IDP_<NAME>_CODE_CHALLENGE_METHOD` | | `microsoft`/`google`/`apple`: `S256`, others: — | PKCE code challenge method (`S256` or `plain`). `microsoft`, `google`, and `apple` always use `S256` regardless of this setting. For `oidc` KIND, set to `S256` when the IdP supports it. No effect for non-OIDC providers. |
 | `IDP_<NAME>_LOGOUT_ENDPOINT` | | Derived from KIND | IdP logout URL. For `microsoft` KIND, auto-derived from the OIDC issuer URL. |
 | `IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL` | | `microsoft`: `true`, others: `false` | Whether oauth2-proxy skips fetching claims from the OIDC userinfo URL. Set to `true` to prevent userinfo from overwriting ID token claims. |
 
-※1 Required only for `microsoft`, `google`, `apple`, and `openid-connect` KIND.
+※1 Required only for `microsoft`, `google`, `apple`, and `oidc` KIND.
 
 ※2 Default values for `IDP_<NAME>_OIDC_ISSUER_URL` by KIND:
 
@@ -58,7 +59,7 @@ Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`.
 | `microsoft` | `https://login.microsoftonline.com/common/v2.0` (use a tenant-specific URL for Entra ID) |
 | `google` | `https://accounts.google.com` |
 | `apple` | `https://appleid.apple.com` |
-| `openid-connect` | — (required) |
+| `oidc` | — (required) |
 
 ### oauth2-proxy Settings
 
@@ -68,6 +69,7 @@ Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`.
 | `OAUTH2_PROXY_COOKIE_SECURE` | | `false` | Sets the `Secure` flag on session cookies. Set to `true` for HTTPS deployments. |
 | `OAUTH2_PROXY_PORT_BASE` | | `4180` | Base port for internal oauth2-proxy instances. Each IDP uses a consecutive port starting from this value (e.g. `4180`, `4181`, …). |
 | `OAUTH2_PROXY_WHITELIST_DOMAIN` | | Derived from `SITE_URL`/`SITE_PORT` | Allowed domain for redirect targets. |
+| `OAUTH2_PROXY_TRUSTED_PROXY_IP` | | `127.0.0.1,::1` when `APP_UPSTREAM` is localhost | Comma-separated list of trusted reverse-proxy IP addresses or CIDRs from which `X-Forwarded-*` headers are accepted. Auto-set to `127.0.0.1,::1` when `APP_UPSTREAM` points to `localhost`, `127.0.0.1`, or `[::1]`. Set explicitly for non-local setups such as Docker (e.g. `172.17.0.0/16`). |
 | `OAUTH2_PROXY_STANDARD_LOGGING` | | `false` | Show oauth2-proxy startup/shutdown messages in the terminal. |
 | `OAUTH2_PROXY_AUTH_LOGGING` | | `false` | Show oauth2-proxy authentication event logs in the terminal. |
 | `OAUTH2_PROXY_REQUEST_LOGGING` | | `false` | Show oauth2-proxy per-request HTTP logs in the terminal. |
@@ -128,6 +130,31 @@ For example: `http://localhost:8080/oauth2/callback`
 ### App not reachable (502 error)
 
 Verify `APP_UPSTREAM` is set correctly and your application is running on that address.
+
+### oauth2-proxy returns HTTP 500
+
+Several possible causes are listed below.
+
+#### 1. Client secret is incorrect
+
+Ensure `IDP_<NAME>_CLIENT_SECRET` is the **secret value**, not the secret ID (object ID).
+
+To diagnose, enable one of the following:
+
+- **`OAUTH2_PROXY_STANDARD_LOGGING = true`**: The following message appears in the output:
+
+  ```text
+  [oauthproxy.go:928] Error redeeming code during OAuth2 callback: token exchange failed: oauth2: "invalid_client" "AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID, for a secret added to app '<app-id>'."
+  ```
+
+- **`OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR = true`**: The browser shows a 500 error page with the following detail:
+
+  ```text
+  500
+  Internal Server Error
+
+  token exchange failed: oauth2: "invalid_client" "AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID, for a secret added to app '<app-id>'."
+  ```
 
 ### Inspecting forwarded headers
 

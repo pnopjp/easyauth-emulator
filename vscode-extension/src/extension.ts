@@ -5,7 +5,7 @@ import { StatusBarManager } from './statusBar';
 import { SecretManager } from './secretManager';
 
 export function activate(context: vscode.ExtensionContext): void {
-    const outputChannel = vscode.window.createOutputChannel('EasyAuth Emulator');
+    const outputChannel = vscode.window.createOutputChannel('EasyAuth Emulator', { log: true });
     const statusBar = new StatusBarManager();
     const secretManager = new SecretManager(context);
     const emulator = new EmulatorManager(context, outputChannel, statusBar, secretManager);

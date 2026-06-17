@@ -281,6 +281,10 @@ Internal `oauth2-proxy` processes are cleaned up automatically by the OS. If the
 - **macOS:** Use Activity Monitor, or run `pkill easyauth-emulator`
 - **Linux:** Run `pkill easyauth-emulator`
 
+### More troubleshooting topics
+
+For additional troubleshooting topics — including oauth2-proxy error diagnosis, OIDC configuration issues, and runtime diagnostics — see the [Runtime Guide: Troubleshooting](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#troubleshooting).
+
 ---
 
 ## Known Limitations

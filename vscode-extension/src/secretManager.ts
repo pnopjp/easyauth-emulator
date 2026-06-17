@@ -121,6 +121,50 @@ export class SecretManager {
         return secret;
     }
 
+    async promptForMissingSecrets(outputChannel: vscode.LogOutputChannel): Promise<boolean> {
+        const config = vscode.workspace.getConfiguration('easyauth');
+        const missing: Array<{ idpKey: string; label: string }> = [];
+
+        for (const { key, label } of BUILTIN_IDPS) {
+            if (!config.get<string>(`${key}.clientId`, '').trim()) continue;
+            if (!await this.get(key)) {
+                missing.push({ idpKey: key, label });
+            }
+        }
+
+        const customs = config.get<Array<{ name?: string; clientId?: string }>>('customIdps', []);
+        for (const c of customs) {
+            const name = c.name?.trim();
+            if (!name || !c.clientId?.trim()) continue;
+            if (!await this.get(`custom:${name}`)) {
+                missing.push({ idpKey: `custom:${name}`, label: name });
+            }
+        }
+
+        for (const { idpKey, label } of missing) {
+            outputChannel.warn(`[extension] Client secret for ${label} is not configured. Waiting for user input...`);
+            outputChannel.show(true);
+            const secret = await vscode.window.showInputBox({
+                title: 'EasyAuth Emulator: Client Secret Required',
+                prompt: `Enter client secret for ${label}`,
+                password: true,
+                ignoreFocusOut: true,
+            });
+            if (secret === undefined) {
+                outputChannel.warn(`[extension] Startup cancelled: client secret for ${label} was not provided.`);
+                return false;
+            }
+            if (!secret.trim()) {
+                outputChannel.warn(`[extension] Startup cancelled: client secret for ${label} cannot be empty.`);
+                vscode.window.showWarningMessage(`Client secret for ${label} cannot be empty.`);
+                return false;
+            }
+            await this.set(idpKey, secret.trim());
+        }
+
+        return true;
+    }
+
     async runClearSecretCommand(): Promise<void> {
         const items = await this.getIdpsWithSecrets();
         if (items.length === 0) {
