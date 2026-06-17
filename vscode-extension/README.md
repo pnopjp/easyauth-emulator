@@ -16,13 +16,8 @@ EasyAuth Emulator bridges that gap by running a compatible authentication gatewa
 
 ## How it works
 
-```mermaid
-graph LR
-    Browser(Browser) -->|request| Emulator("EasyAuth Emulator<br />port 8080, configurable")
-    Emulator -->|unauthenticated → redirect| IdP("IdP<br />(Entra ID / Google / ...)")
-    IdP -->|OAuth2 callback| Emulator
-    Emulator -->|authenticated +<br />Easy Auth headers| App("Your App<br />auto-detected port")
-```
+![How it works](https://raw.githubusercontent.com/pnopjp/easyauth-emulator/main/vscode-extension/images/flow.png)
+
 
 The extension auto-detects your app's listening port from `launch.json`, framework config files (`.env`, `launchSettings.json`, `application.properties`, …), or debug output — so no manual wiring is needed in most projects.
 

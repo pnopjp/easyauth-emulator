@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 740 245" width="740" height="245" font-family="'Segoe UI', Arial, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#555"/>
+    </marker>
+  </defs>
+
+  <!-- Browser (center y=130) -->
+  <rect x="10" y="25" width="120" height="50" rx="6" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="70" y="54" text-anchor="middle" font-size="14" fill="#1a1a1a">Browser</text>
+
+  <!-- EasyAuth Emulator (center y=130, top=95, bottom=165) -->
+  <rect x="200" y="15" width="230" height="70" rx="6" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="315" y="44" text-anchor="middle" font-size="14" font-weight="bold" fill="#1a1a1a">EasyAuth Emulator</text>
+  <text x="315" y="64" text-anchor="middle" font-size="12" fill="#555">port 8080, configurable</text>
+
+  <!-- Your App (center y=130) -->
+  <rect x="565" y="25" width="160" height="50" rx="6" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="645" y="46" text-anchor="middle" font-size="13" fill="#1a1a1a">Your App</text>
+  <text x="645" y="63" text-anchor="middle" font-size="11" fill="#555">auto-detected port</text>
+
+  <!-- IdP -->
+  <rect x="215" y="165" width="200" height="60" rx="6" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="315" y="192" text-anchor="middle" font-size="14" fill="#1a1a1a">IdP</text>
+  <text x="315" y="210" text-anchor="middle" font-size="11" fill="#555">(Entra ID / Google / ...)</text>
+
+  <!-- Arrow: Browser → Emulator at y=130 -->
+  <line x1="130" y1="50" x2="199" y2="50" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="164" y="40" text-anchor="middle" font-size="11" fill="#555">request</text>
+
+  <!-- Arrow: Emulator → App at y=130 (same y as above); labels above the line -->
+  <line x1="430" y1="50" x2="564" y2="50" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="497" y="27" text-anchor="middle" font-size="11" fill="#555">authenticated +</text>
+  <text x="497" y="40" text-anchor="middle" font-size="11" fill="#555">Easy Auth headers</text>
+
+  <!-- Arrow: Emulator → IdP (down, left side) -->
+  <line x1="305" y1="85" x2="305" y2="164" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="300" y="120" text-anchor="end" font-size="11" fill="#555">redirect</text>
+  <text x="300" y="134" text-anchor="end" font-size="11" fill="#555">(unauthenticated)</text>
+
+  <!-- Arrow: IdP → Emulator (up, right side) -->
+  <line x1="325" y1="164" x2="325" y2="86" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="330" y="120" text-anchor="start" font-size="11" fill="#555">OAuth2</text>
+  <text x="330" y="134" text-anchor="start" font-size="11" fill="#555">callback</text>
+</svg>

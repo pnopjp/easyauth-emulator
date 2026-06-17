@@ -3,7 +3,7 @@
   "displayName": "EasyAuth Emulator",
   "description": "Integrates EasyAuth Emulator with VS Code debug sessions — auto-starts and stops the proxy as you debug.",
   "version": "0.0.0",
-  "publisher": "easyauth",
+  "publisher": "pnop",
   "repository": {
     "type": "git",
     "url": "https://github.com/pnopjp/easyauth-emulator"
@@ -14,6 +14,7 @@
   "categories": [
     "Other"
   ],
+  "icon": "images/icon.png",
   "keywords": [
     "easyauth",
     "azure",
