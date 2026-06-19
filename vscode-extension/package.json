@@ -182,6 +182,13 @@
             "scope": "resource",
             "order": 7,
             "markdownDescription": "`IDP_ENTRA_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line. Example: `--allowed-group=my-group --oidc-extra-audience=myapp`."
+          },
+          "easyauth.entra.icon": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 8,
+            "markdownDescription": "`IDP_ENTRA_ICON`: Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug (e.g. `microsoft`) or an image URL."
           }
         }
       },
@@ -223,6 +230,13 @@
             "scope": "resource",
             "order": 6,
             "markdownDescription": "`IDP_GOOGLE_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
+          },
+          "easyauth.google.icon": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`IDP_GOOGLE_ICON`: Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug or an image URL."
           }
         }
       },
@@ -264,6 +278,13 @@
             "scope": "resource",
             "order": 6,
             "markdownDescription": "`IDP_FACEBOOK_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
+          },
+          "easyauth.facebook.icon": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`IDP_FACEBOOK_ICON`: Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug or an image URL."
           }
         }
       },
@@ -305,6 +326,13 @@
             "scope": "resource",
             "order": 6,
             "markdownDescription": "`IDP_APPLE_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
+          },
+          "easyauth.apple.icon": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`IDP_APPLE_ICON`: Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug or an image URL."
           }
         }
       },
@@ -346,6 +374,13 @@
             "scope": "resource",
             "order": 6,
             "markdownDescription": "`IDP_GITHUB_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
+          },
+          "easyauth.github.icon": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`IDP_GITHUB_ICON`: Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug or an image URL."
           }
         }
       },
@@ -415,6 +450,10 @@
                 "extraArgs": {
                   "type": "string",
                   "description": "IDP_<NAME>_EXTRA_ARGS: Space-separated extra flags appended verbatim to the oauth2-proxy command line (e.g. '--allowed-group=my-group --oidc-extra-audience=myapp')."
+                },
+                "icon": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_ICON: Icon shown on the IdP selection page. Specify a Simple Icons slug (e.g. 'microsoft') or an image URL."
                 }
               },
               "additionalProperties": false

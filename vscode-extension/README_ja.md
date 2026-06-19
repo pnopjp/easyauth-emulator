@@ -170,6 +170,7 @@ http://localhost:8080/oauth2/callback
 | `logoutEndpoint` | | IdP ログアウト URL の上書き |
 | `skipClaimsFromProfileUrl` | | `true` にすると userinfo エンドポイントからの claim 取得をスキップ |
 | `extraArgs` | | oauth2-proxy に追加で渡す起動オプション（スペース区切り、例: `"--allowed-group=my-group --oidc-extra-audience=myapp"`） |
+| `icon` | | IdP 選択画面に表示するアイコン。[Simple Icons](https://simpleicons.org) のスラッグ（例: `"microsoft"`）または画像 URL を指定。`IDP_SELECT_ICONS` が `generic` または `text` の場合は無効。 |
 
 ---
 

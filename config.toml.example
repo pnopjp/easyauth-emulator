@@ -101,6 +101,7 @@ OAUTH2_PROXY_COOKIE_SECURE = false
 # Per-IDP variable template — replace <NAME> with the IDP ID from IDP_LIST, converted to uppercase.
 # Example: IDP_LIST = ["myoidc"] → use IDP_MYOIDC_* keys.
 # IDP_<NAME>_DISPLAY_NAME = ""
+# IDP_<NAME>_ICON = ""               # optional; Simple Icons slug (e.g. "microsoft") or image URL
 # IDP_<NAME>_KIND = ""               # microsoft | apple | facebook | github | google | oidc
 # IDP_<NAME>_OIDC_ISSUER_URL = ""    # required for microsoft, apple, google, oidc
 # IDP_<NAME>_CLIENT_ID = ""

@@ -315,6 +315,8 @@ export class EmulatorManager implements vscode.Disposable {
             if (authUserIdClaim) extra[`IDP_${envKey}_AUTH_USER_ID_CLAIM`] = authUserIdClaim;
             const extraArgs = config.get<string>(`${idpName}.extraArgs`, '').trim();
             if (extraArgs) extra[`IDP_${envKey}_EXTRA_ARGS`] = extraArgs;
+            const icon = config.get<string>(`${idpName}.icon`, '').trim();
+            if (icon) extra[`IDP_${envKey}_ICON`] = icon;
         }
 
         // Entra-specific: full OIDC issuer URL
@@ -337,6 +339,7 @@ export class EmulatorManager implements vscode.Disposable {
             logoutEndpoint?: string;
             skipClaimsFromProfileUrl?: boolean;
             extraArgs?: string;
+            icon?: string;
         }
         const customIdps = config.get<CustomIdp[]>('customIdps', []);
         for (const idp of customIdps) {
@@ -361,6 +364,7 @@ export class EmulatorManager implements vscode.Disposable {
             if (idp.logoutEndpoint?.trim()) extra[`IDP_${envKey}_LOGOUT_ENDPOINT`] = idp.logoutEndpoint.trim();
             if (idp.skipClaimsFromProfileUrl) extra[`IDP_${envKey}_SKIP_CLAIMS_FROM_PROFILE_URL`] = 'true';
             if (idp.extraArgs?.trim()) extra[`IDP_${envKey}_EXTRA_ARGS`] = idp.extraArgs.trim();
+            if (idp.icon?.trim()) extra[`IDP_${envKey}_ICON`] = idp.icon.trim();
         }
 
         if (idpList.length > 0) extra['IDP_LIST'] = idpList.join(',');

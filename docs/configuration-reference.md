@@ -46,6 +46,7 @@ Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`, where `<NAME>` is 
 | Parameter | Required | Default | Description |
 | --- | :---: | --- | --- |
 | `IDP_<NAME>_DISPLAY_NAME` | | IDP name | Label shown on the IdP selection page. |
+| `IDP_<NAME>_ICON` | | — | Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug (e.g. `microsoft`) or an image URL. Has no effect when `IDP_SELECT_ICONS` is `generic` or `text`. |
 | `IDP_<NAME>_KIND` | | Inferred from IDP name | Identity provider backend type. Well-known names are auto-detected (`entra` → `microsoft`, etc.); others default to `oidc`. Accepted values: `microsoft` (Entra ID / Microsoft account), `google`, `apple`, `facebook`, `github`, `oidc` (alias: `openid-connect`). |
 | `IDP_<NAME>_CLIENT_ID` | ✓ | — | OAuth2 / OIDC client ID registered with the identity provider. |
 | `IDP_<NAME>_CLIENT_SECRET` | ✓ | — | OAuth2 / OIDC client secret registered with the identity provider. |
@@ -74,7 +75,7 @@ Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`, where `<NAME>` is 
 
 oauth2-proxy's GitHub provider calls the GitHub `/user/emails` and `/user/orgs` APIs during session creation and requires the scopes `user:email` and `read:org`. The emulator sets these as the default scopes automatically.
 
-**OAuth App (recommended):** Create the app under GitHub Settings → Developer settings → OAuth Apps. No additional configuration is needed beyond `IDP_GITHUB_CLIENT_ID` and `IDP_GITHUB_CLIENT_SECRET`.
+**OAuth App:** Create the app under GitHub Settings → Developer settings → OAuth Apps. No additional configuration is needed beyond `IDP_GITHUB_CLIENT_ID` and `IDP_GITHUB_CLIENT_SECRET`.
 
 **GitHub App:** When using a GitHub App instead of an OAuth App, the User Authorization (OAuth) flow uses the same `CLIENT_ID` / `CLIENT_SECRET` fields, but the GitHub App must have the following permission granted on the **Permissions & events** page:
 

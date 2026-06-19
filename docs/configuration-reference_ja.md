@@ -46,6 +46,7 @@
 | パラメーター | 必須 | 既定値 | 説明 |
 | --- | :---: | --- | --- |
 | `IDP_<NAME>_DISPLAY_NAME` | | IdP 名 | IdP 選択画面に表示する表示名。 |
+| `IDP_<NAME>_ICON` | | — | IdP 選択画面に表示するアイコン。[Simple Icons](https://simpleicons.org) のスラッグ（例: `microsoft`）または画像 URL を指定。`IDP_SELECT_ICONS` が `generic` または `text` の場合は無効。 |
 | `IDP_<NAME>_KIND` | | IdP 名から推定 | IdP のバックエンド種別。既知の IdP 名は自動検出（`entra` → `microsoft` など）、それ以外は `oidc` が既定。指定可能な値: `microsoft`（Entra ID / Microsoft account）、`google`、`apple`、`facebook`、`github`、`oidc`（エイリアス: `openid-connect`）。 |
 | `IDP_<NAME>_CLIENT_ID` | ✓ | — | IdP に登録した OAuth2 / OIDC client ID。 |
 | `IDP_<NAME>_CLIENT_SECRET` | ✓ | — | IdP に登録した OAuth2 / OIDC client secret。 |
@@ -74,7 +75,7 @@
 
 oauth2-proxy の GitHub プロバイダーはセッション作成時に GitHub の `/user/emails` および `/user/orgs` API を呼び出すため、`user:email` と `read:org` スコープが必要です。エミュレーターはこれらをデフォルトスコープとして自動設定します。
 
-**OAuth App（推奨）：** GitHub Settings → Developer settings → OAuth Apps でアプリを作成します。`IDP_GITHUB_CLIENT_ID` と `IDP_GITHUB_CLIENT_SECRET` を設定するだけで追加の設定は不要です。
+**OAuth App：** GitHub Settings → Developer settings → OAuth Apps でアプリを作成します。`IDP_GITHUB_CLIENT_ID` と `IDP_GITHUB_CLIENT_SECRET` を設定するだけで追加の設定は不要です。
 
 **GitHub App：** OAuth App の代わりに GitHub App を使用する場合、ユーザー認可（OAuth）フローは同じ `CLIENT_ID` / `CLIENT_SECRET` フィールドを使いますが、GitHub App の **Permissions & events** ページで以下の権限を付与する必要があります：
 

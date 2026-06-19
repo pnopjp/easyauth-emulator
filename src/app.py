@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import base64
 import datetime
+import html
 import http.client
 import json
 import os
@@ -119,15 +120,17 @@ _HOP_BY_HOP = frozenset({
     "te", "trailers", "transfer-encoding", "upgrade",
 })
 
-# Simple Icons CDN slugs (https://simpleicons.org, CC0 licensed).
+# Simple Icons CDN slugs (https://simpleicons.org, CC0 licensed), keyed by KIND.
 # Providers not listed here fall back to the generic icon.
-_IDP_SIMPLE_ICONS: dict[str, str] = {
-    "google":        "google",
-    "apple":         "apple",
-    "github":        "github",
-    "facebook":      "facebook",
+_KIND_SIMPLE_ICONS: dict[str, str] = {
+    "google":         "google",
+    "apple":          "apple",
+    "github":         "github",
+    "facebook":       "facebook",
+    "oidc":           "openid",
     "openid-connect": "openid",
 }
+_SIMPLEICONS_SLUG_RE = re.compile(r'^[a-z0-9-]+$')
 
 # IDP_SELECT_ICONS controls icon style on /.auth/login/select.
 #   simple   — Simple Icons CDN logo (default)
@@ -152,7 +155,16 @@ def _idp_icon_html(idp: str) -> str:
         return ""
     if IDP_SELECT_ICONS == "generic":
         return _IDP_ICON_GENERIC
-    slug = _IDP_SIMPLE_ICONS.get(idp)
+    icon_cfg = (_cfg(f"{_idp_cfg_prefix(idp)}_ICON") or "").strip()
+    if icon_cfg:
+        if icon_cfg.startswith(("http://", "https://")):
+            safe_url = html.escape(icon_cfg, quote=True)
+            return f'<img class="icon" src="{safe_url}" width="22" height="22" alt="">'
+        if _SIMPLEICONS_SLUG_RE.match(icon_cfg):
+            return f'<img class="icon" src="https://cdn.simpleicons.org/{icon_cfg}" width="22" height="22" alt="">'
+        return _IDP_ICON_GENERIC
+    kind = _idp_kind(idp) or _IDP_DEFAULT_KIND.get(idp, "")
+    slug = _KIND_SIMPLE_ICONS.get(kind)
     if not slug:
         return _IDP_ICON_GENERIC
     return f'<img class="icon" src="https://cdn.simpleicons.org/{slug}" width="22" height="22" alt="">'
