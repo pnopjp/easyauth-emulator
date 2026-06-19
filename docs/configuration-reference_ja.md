@@ -70,6 +70,20 @@
 | `apple` | `https://appleid.apple.com` |
 | `oidc` | — （必須） |
 
+### GitHub プロバイダーに関する注意
+
+oauth2-proxy の GitHub プロバイダーはセッション作成時に GitHub の `/user/emails` および `/user/orgs` API を呼び出すため、`user:email` と `read:org` スコープが必要です。エミュレーターはこれらをデフォルトスコープとして自動設定します。
+
+**OAuth App（推奨）：** GitHub Settings → Developer settings → OAuth Apps でアプリを作成します。`IDP_GITHUB_CLIENT_ID` と `IDP_GITHUB_CLIENT_SECRET` を設定するだけで追加の設定は不要です。
+
+**GitHub App：** OAuth App の代わりに GitHub App を使用する場合、ユーザー認可（OAuth）フローは同じ `CLIENT_ID` / `CLIENT_SECRET` フィールドを使いますが、GitHub App の **Permissions & events** ページで以下の権限を付与する必要があります：
+
+| セクション | 権限 | 必要なレベル |
+| --- | --- | --- |
+| Account permissions | Email addresses | Read-only または Read and write |
+
+この権限がない場合、ブラウザには `500 Internal Server Error` が表示されてログインに失敗します。`OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR = true` を設定すると、詳細なエラー原因として `unexpected status "403": {"message":"Resource not accessible by integration"}` が確認できます。
+
 ### oauth2-proxy 設定
 
 | パラメーター | 必須 | 既定値 | 説明 |

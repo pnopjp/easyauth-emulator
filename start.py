@@ -342,7 +342,12 @@ def _process_idp(env: dict, idp: str, port: int,
     client_secret = _get(env, f"{pfx}_CLIENT_SECRET")
     auth_provider = _get(env, f"{pfx}_AUTH_PROVIDER", default_auth_provider)
     user_id_claim = _get(env, f"{pfx}_AUTH_USER_ID_CLAIM", default_claim)
-    scopes        = _get(env, f"{pfx}_SCOPES", "openid profile email")
+    _KIND_DEFAULT_SCOPES: dict[str, str] = {
+        "github":   "user:email read:org",
+        "facebook": "public_profile email",
+    }
+    default_scopes = _KIND_DEFAULT_SCOPES.get(idp_kind, "openid profile email")
+    scopes         = _get(env, f"{pfx}_SCOPES", default_scopes)
     prompt        = _get(env, f"{pfx}_PROMPT", "")
     # Known providers (microsoft/google/apple) use hardcoded S256; generic OIDC allows config override.
     code_challenge_method = default_pkce or _get(env, f"{pfx}_CODE_CHALLENGE_METHOD", "")

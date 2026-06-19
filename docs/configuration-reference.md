@@ -70,6 +70,20 @@ Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`, where `<NAME>` is 
 | `apple` | `https://appleid.apple.com` |
 | `oidc` | — (required) |
 
+### GitHub Provider Notes
+
+oauth2-proxy's GitHub provider calls the GitHub `/user/emails` and `/user/orgs` APIs during session creation and requires the scopes `user:email` and `read:org`. The emulator sets these as the default scopes automatically.
+
+**OAuth App (recommended):** Create the app under GitHub Settings → Developer settings → OAuth Apps. No additional configuration is needed beyond `IDP_GITHUB_CLIENT_ID` and `IDP_GITHUB_CLIENT_SECRET`.
+
+**GitHub App:** When using a GitHub App instead of an OAuth App, the User Authorization (OAuth) flow uses the same `CLIENT_ID` / `CLIENT_SECRET` fields, but the GitHub App must have the following permission granted on the **Permissions & events** page:
+
+| Section | Permission | Required level |
+| --- | --- | --- |
+| Account permissions | Email addresses | Read-only or Read and write |
+
+Without this permission, login fails with a `500 Internal Server Error` in the browser. Enabling `OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR = true` reveals the underlying cause: `unexpected status "403": {"message":"Resource not accessible by integration"}`.
+
 ### oauth2-proxy Settings
 
 | Parameter | Required | Default | Description |

@@ -159,7 +159,7 @@ IDP_ENTRA_SCOPES = "openid profile email"
 # IDP_GITHUB_KIND = "github"
 # IDP_GITHUB_CLIENT_ID = ""
 # IDP_GITHUB_CLIENT_SECRET = ""
-# IDP_GITHUB_SCOPES = "read:user user:email"
+# IDP_GITHUB_SCOPES = "user:email read:org"
 
 # --- Generic OIDC (example when IDP_LIST = ["myoidc"]) ----------------------
 # IDP_MYOIDC_DISPLAY_NAME = "OpenID Connect"
