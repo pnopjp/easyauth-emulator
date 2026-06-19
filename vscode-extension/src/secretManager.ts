@@ -121,6 +121,21 @@ export class SecretManager {
         return secret;
     }
 
+    async hasUnsetSecrets(): Promise<boolean> {
+        const config = vscode.workspace.getConfiguration('easyauth');
+        for (const { key } of BUILTIN_IDPS) {
+            if (!config.get<string>(`${key}.clientId`, '').trim()) continue;
+            if (!await this.get(key)) return true;
+        }
+        const customs = config.get<Array<{ name?: string; clientId?: string }>>('customIdps', []);
+        for (const c of customs) {
+            const name = c.name?.trim();
+            if (!name || !c.clientId?.trim()) continue;
+            if (!await this.get(`custom:${name}`)) return true;
+        }
+        return false;
+    }
+
     async promptForMissingSecrets(outputChannel: vscode.LogOutputChannel): Promise<boolean> {
         const config = vscode.workspace.getConfiguration('easyauth');
         const missing: Array<{ idpKey: string; label: string }> = [];

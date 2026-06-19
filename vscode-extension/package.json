@@ -76,6 +76,12 @@
             "default": false,
             "order": 6,
             "markdownDescription": "Print all resolved configuration values (secrets masked) on startup. Passes `--verbose` to the emulator process."
+          },
+          "easyauth.privateBrowser.command": {
+            "type": "string",
+            "default": "",
+            "order": 7,
+            "markdownDescription": "Command to launch a private/incognito browser window. The site URL is appended as the last argument.\n\n**Examples:**\n- `msedge --inprivate`\n- `chrome --incognito`\n- `firefox --private-window`\n\nLeave empty to hide the private browser button."
           }
         }
       },
@@ -545,34 +551,127 @@
         }
       }
     ],
+    "views": {
+      "explorer": [
+        {
+          "id": "easyauth.statusView",
+          "name": "EasyAuth Emulator"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "easyauth.openSettings",
+          "when": "view == easyauth.statusView && easyauth.state == unconfigured",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.setSecret",
+          "when": "view == easyauth.statusView && easyauth.needsSecret",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.openInBrowser",
+          "when": "view == easyauth.statusView && easyauth.state == running",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.openInPrivateBrowser",
+          "when": "view == easyauth.statusView && easyauth.state == running && easyauth.privateBrowserConfigured",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.start",
+          "when": "view == easyauth.statusView && (easyauth.state == stopped || easyauth.state == error)",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.restart",
+          "when": "view == easyauth.statusView && (easyauth.state == running || easyauth.state == starting)",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.stop",
+          "when": "view == easyauth.statusView && (easyauth.state == running || easyauth.state == starting)",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.openOutput",
+          "when": "view == easyauth.statusView && (easyauth.state == running || easyauth.state == starting || easyauth.state == error)",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "easyauth.openSettings",
+          "when": "view == easyauth.statusView",
+          "group": "inline"
+        },
+        {
+          "command": "easyauth.setSecret",
+          "when": "view == easyauth.statusView",
+          "group": "inline"
+        },
+        {
+          "command": "easyauth.openOutput",
+          "when": "view == easyauth.statusView && (viewItem == easyauth.running || viewItem == easyauth.starting || viewItem == easyauth.error)"
+        }
+      ]
+    },
     "commands": [
       {
+        "command": "easyauth.openSettings",
+        "title": "EasyAuth Emulator: Open Settings",
+        "shortTitle": "Settings",
+        "icon": "$(gear)"
+      },
+      {
         "command": "easyauth.start",
-        "title": "EasyAuth Emulator: Start"
+        "title": "EasyAuth Emulator: Start",
+        "shortTitle": "Start",
+        "icon": "$(play)"
       },
       {
         "command": "easyauth.stop",
-        "title": "EasyAuth Emulator: Stop"
+        "title": "EasyAuth Emulator: Stop",
+        "shortTitle": "Stop",
+        "icon": "$(stop-circle)"
       },
       {
         "command": "easyauth.restart",
-        "title": "EasyAuth Emulator: Restart"
+        "title": "EasyAuth Emulator: Restart",
+        "shortTitle": "Restart",
+        "icon": "$(refresh)"
       },
       {
         "command": "easyauth.openOutput",
-        "title": "EasyAuth Emulator: Open Output"
+        "title": "EasyAuth Emulator: Open Output",
+        "shortTitle": "Show Output",
+        "icon": "$(output)"
       },
       {
         "command": "easyauth.openInBrowser",
-        "title": "EasyAuth Emulator: Open in Browser"
+        "title": "EasyAuth Emulator: Open in Browser",
+        "shortTitle": "Open in Browser",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "easyauth.openInPrivateBrowser",
+        "title": "EasyAuth Emulator: Open in Private Browser",
+        "shortTitle": "Open in Private Browser",
+        "icon": "$(eye-closed)"
       },
       {
         "command": "easyauth.setSecret",
-        "title": "EasyAuth Emulator: Set Client Secret"
+        "title": "EasyAuth Emulator: Set Client Secret",
+        "shortTitle": "Set Client Secret",
+        "icon": "$(key)"
       },
       {
         "command": "easyauth.clearSecret",
-        "title": "EasyAuth Emulator: Clear Client Secret"
+        "title": "EasyAuth Emulator: Clear Client Secret",
+        "shortTitle": "Clear Client Secret"
       }
     ]
   },

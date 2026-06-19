@@ -39,7 +39,7 @@ push v*.*.*
 #### グループ A — 完全な純粋関数（環境依存なし）
 
 | 関数 | ファイル:行 | テストシナリオ |
-|---|---|---|
+| --- | --- | --- |
 | `_decode_jwt_claims(token)` | `src/app.py:290` | 正常な JWT → クレーム dict；不正な base64 → `{}`；セグメント数不正 → `{}`；空文字列 → `{}` |
 | `_decode_principal(header_value)` | `src/app.py:280` | 正常な base64 JSON → dict；不正な base64 → `None`；空文字列 → `None` |
 | `_compute_client_principal(user, email, provider, claim, id_token)` | `src/app.py:305` | JWT id\_token あり → JWT からクレームを取得；id\_token なし → フォールバッククレーム；user・email ともに空 → `""`；出力は必須キー（`auth_typ`・`name_typ`・`role_typ`・`claims`）を持つ正常な base64 JSON |
@@ -52,7 +52,7 @@ push v*.*.*
 #### グループ B — 環境依存関数（`monkeypatch.setenv` でテスト可能）
 
 | 関数 | ファイル:行 | テストシナリオ |
-|---|---|---|
+| --- | --- | --- |
 | `_parse_bool_cfg(name, default)` | `src/app.py:171` | `"1"`・`"true"`・`"yes"`・`"on"` → `True`；`"false"`・`"0"`・`""` → `False`；環境変数未設定時はデフォルト値を使用 |
 | `_idp_auth_provider(idp)` | `src/app.py:210` | `entra` でオーバーライドなし → `"aad"`；`IDP_ENTRA_KIND=oidc` → `"oidc"`；`IDP_ENTRA_AUTH_PROVIDER` が最優先 |
 | `_idp_user_id_claim(idp)` | `src/app.py:217` | `entra` → `"preferred_username"`；`google` → `"email"`；`IDP_ENTRA_AUTH_USER_ID_CLAIM` でオーバーライド可能 |
@@ -73,7 +73,7 @@ private メソッドは `(instance as any).method(...)` 経由でアクセスし
 ### テスト対象
 
 | メソッド | ファイル:行 | テストシナリオ |
-|---|---|---|
+| --- | --- | --- |
 | `extractPortFromText(text)` | `portDetector.ts:250` | .NET: `"Now listening on: http://localhost:5000"` → `5000`；Tomcat: `"Tomcat started on port 8080"` → `8080`；汎用: `"listening on port 3000"` → `3000`；Flask: `"Running on http://127.0.0.1:5000"` → `5000`；Uvicorn: `"Uvicorn running on http://0.0.0.0:8000"` → `8000`；マッチしないテキスト → `null` |
 | `portFromUrlList(urlStr)` | `portDetector.ts:160` | 単一 URL → ポート番号；セミコロン区切りリストで HTTP を HTTPS より優先；末尾スラッシュを正しく処理；明示ポートのない URL → `null`；空文字列 → `null` |
 | `portFromLaunchConfig(cfg)` | `portDetector.ts:135` | `env.PORT` 設定 → 返す；`ASPNETCORE_URLS` → ポート抽出；`ASPNETCORE_HTTP_PORTS` → 先頭ポート抽出；`applicationUrl` 文字列 → ポート抽出；いずれも未設定 → `null` |
@@ -92,7 +92,7 @@ private メソッドは `(instance as any).method(...)` 経由でアクセスし
 ### テストシナリオ
 
 | 確認内容 | コマンド | 期待値 |
-|---|---|---|
+| --- | --- | --- |
 | バイナリが実行可能で正常終了する | `./easyauth-emulator --help` | 終了コード `0` |
 
 これは意図的に最小限の確認です。以下を保証します：
@@ -105,7 +105,7 @@ private メソッドは `(instance as any).method(...)` 経由でアクセスし
 ## 将来のテスト拡充計画
 
 | レイヤー | 内容 | 優先度 |
-|---|---|---|
+| --- | --- | --- |
 | VS Code 拡張機能 統合テスト | `@vscode/test-electron` + Mocha；`EmulatorManager` 状態遷移・`PortDetector.detect()` フロー全体 | CI での VS Code ヘッドレスセットアップが必要 |
 | E2E / HTTP 統合テスト | ゲートウェイを起動してリクエストを送り、レスポンスヘッダーをアサート | モック oauth2-proxy または実際の IDP クレデンシャルが必要 |
 | 設定バリデーションテスト | 不正な `config.toml` を渡してエラーハンドリングを検証 | 優先度低（既存の TOML パースでほぼカバー済み） |

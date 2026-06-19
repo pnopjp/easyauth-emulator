@@ -15,13 +15,16 @@ export class EmulatorManager implements vscode.Disposable {
     private startTimeout: ReturnType<typeof setTimeout> | null = null;
     private currentPort: number | null = null;
 
+    private readonly _onDidChangeState = new vscode.EventEmitter<EmulatorState>();
+    readonly onDidChangeState: vscode.Event<EmulatorState> = this._onDidChangeState.event;
+
     constructor(
         private readonly context: vscode.ExtensionContext,
         private readonly outputChannel: vscode.LogOutputChannel,
         private readonly statusBar: StatusBarManager,
         private readonly secretManager: SecretManager,
     ) {
-        statusBar.update(this.hasConfig() ? 'stopped' : 'unconfigured', null, null);
+        this.setState(this.hasConfig() ? 'stopped' : 'unconfigured');
     }
 
     isManaging(): boolean {
@@ -189,13 +192,16 @@ export class EmulatorManager implements vscode.Disposable {
 
     dispose(): void {
         void this.stop();
+        this._onDidChangeState.dispose();
     }
 
     private setState(state: EmulatorState): void {
         this.state = state;
         void vscode.commands.executeCommand('setContext', 'easyauth.running', state === 'running');
+        void vscode.commands.executeCommand('setContext', 'easyauth.state', state);
         const listenPort = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
         this.statusBar.update(state, listenPort, this.currentPort);
+        this._onDidChangeState.fire(state);
     }
 
     private clearStartTimeout(): void {
@@ -261,6 +267,14 @@ export class EmulatorManager implements vscode.Disposable {
         if (builtins.some(idp => vsConfig.get<string>(`${idp}.clientId`, '').trim())) return true;
         const customs = vsConfig.get<Array<{ name?: string; clientId?: string }>>('customIdps', []);
         return customs.some(idp => idp.name?.trim() && idp.clientId?.trim());
+    }
+
+    onConfigurationChanged(): void {
+        if (this.state === 'unconfigured' && this.hasConfig()) {
+            this.setState('stopped');
+        } else if (this.state === 'stopped' && !this.hasConfig()) {
+            this.setState('unconfigured');
+        }
     }
 
     private async buildEnv(port: number): Promise<NodeJS.ProcessEnv> {

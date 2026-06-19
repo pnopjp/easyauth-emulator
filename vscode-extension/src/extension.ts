@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
+import * as cp from 'child_process';
 import { EmulatorManager } from './emulatorManager';
 import { PortDetector } from './portDetector';
 import { StatusBarManager } from './statusBar';
 import { SecretManager } from './secretManager';
+import { EmulatorTreeProvider } from './emulatorTreeProvider';
 
 export function activate(context: vscode.ExtensionContext): void {
     const outputChannel = vscode.window.createOutputChannel('EasyAuth Emulator', { log: true });
@@ -12,6 +14,46 @@ export function activate(context: vscode.ExtensionContext): void {
     const portDetector = new PortDetector(outputChannel);
 
     context.subscriptions.push(outputChannel, statusBar, emulator);
+
+    const treeProvider = new EmulatorTreeProvider();
+    const treeView = vscode.window.createTreeView('easyauth.statusView', {
+        treeDataProvider: treeProvider,
+        showCollapseAll: false,
+    });
+    treeProvider.update(emulator.getState());
+    treeView.description = emulator.getState();
+
+    function updatePrivateBrowserContext(): void {
+        const cmd = vscode.workspace.getConfiguration('easyauth').get<string>('privateBrowser.command', '').trim();
+        void vscode.commands.executeCommand('setContext', 'easyauth.privateBrowserConfigured', !!cmd);
+    }
+
+    async function updateSecretContext(): Promise<void> {
+        const needs = await secretManager.hasUnsetSecrets();
+        void vscode.commands.executeCommand('setContext', 'easyauth.needsSecret', needs);
+    }
+
+    updatePrivateBrowserContext();
+    void updateSecretContext();
+
+    context.subscriptions.push(
+        treeProvider,
+        treeView,
+        emulator.onDidChangeState(state => {
+            treeProvider.update(state);
+            treeView.description = state;
+        }),
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('easyauth')) {
+                updatePrivateBrowserContext();
+                void updateSecretContext();
+                emulator.onConfigurationChanged();
+            }
+        }),
+        context.secrets.onDidChange(() => {
+            void updateSecretContext();
+        }),
+    );
 
     let outputShownSinceError = false;
 
@@ -65,7 +107,7 @@ export function activate(context: vscode.ExtensionContext): void {
             const state = emulator.getState();
             switch (state) {
                 case 'unconfigured':
-                    await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:easyauth.easyauth-emulator');
+                    await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', '@ext:pnop.easyauth-emulator');
                     break;
                 case 'starting':
                     outputChannel.show();
@@ -98,6 +140,71 @@ export function activate(context: vscode.ExtensionContext): void {
                     }
                     break;
             }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('easyauth.openSettings', async () => {
+            await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', '@ext:pnop.easyauth-emulator');
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('easyauth.openInPrivateBrowser', () => {
+            const cmd = vscode.workspace.getConfiguration('easyauth').get<string>('privateBrowser.command', '').trim();
+            if (!cmd) {
+                void vscode.window.showErrorMessage(
+                    'EasyAuth: Set easyauth.privateBrowser.command in settings first.',
+                    'Open Settings'
+                ).then(sel => {
+                    if (sel === 'Open Settings') {
+                        void vscode.commands.executeCommand('easyauth.openSettings');
+                    }
+                });
+                return;
+            }
+            const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
+            if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+                void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
+                return;
+            }
+            const url = `http://localhost:${port}`;
+            const parts = cmd.split(/\s+/);
+
+            // Allowlist: letters, digits, hyphens, underscores, dots, slashes, colons (Windows paths).
+            // Rejects shell metacharacters (&, |, ;, $, `, etc.) that could inject commands.
+            const tokenOk = /^[A-Za-z0-9_.\\/:~-]+$/;
+            const badToken = parts.find(t => !tokenOk.test(t));
+            if (badToken) {
+                void vscode.window.showErrorMessage(
+                    `EasyAuth: Unsafe character in privateBrowser.command token "${badToken}". Allowed: letters, digits, - _ . / \\ : ~`
+                );
+                return;
+            }
+
+            outputChannel.info(`[extension] Opening private browser: ${cmd} ${url}`);
+
+            // On Windows use `cmd /c start` so App Paths (msedge, chrome, etc.) are resolved
+            // via ShellExecuteEx — they are not on PATH and cp.spawn cannot find them directly.
+            // Tokens are validated above so no shell metacharacters can reach cmd.exe.
+            // On POSIX, `--` separates options from the URL to prevent flag-smuggling.
+            const proc = process.platform === 'win32'
+                ? cp.spawn('cmd', ['/c', 'start', '', ...parts, url], { detached: true, stdio: 'ignore' })
+                : cp.spawn(parts[0], [...parts.slice(1), '--', url], { detached: true, stdio: 'ignore' });
+
+            proc.on('error', (err) => {
+                outputChannel.error(`[extension] Private browser spawn error: ${err.message}`);
+                void vscode.window.showErrorMessage(`EasyAuth: Failed to launch browser: ${err.message}`);
+            });
+            proc.on('close', (code) => {
+                if (typeof code === 'number' && code !== 0) {
+                    outputChannel.error(`[extension] Private browser exited with code ${code}`);
+                    void vscode.window.showErrorMessage(
+                        `EasyAuth: Private browser command failed (exit ${code}). Check easyauth.privateBrowser.command.`
+                    );
+                }
+            });
+            proc.unref();
         })
     );
 
