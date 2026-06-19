@@ -4,7 +4,7 @@ a = Analysis(
     ['start.py'],
     pathex=[],
     binaries=[],
-    datas=[('src', 'src'), ('config.toml.example', '.')],
+    datas=[('src', 'src')],
     hiddenimports=['truststore'],
     hookspath=[],
     hooksconfig={},
@@ -41,4 +41,10 @@ coll = COLLECT(
     upx=True,
     upx_exclude=[],
     name='easyauth-emulator',
+)
+
+import shutil
+shutil.copy2(
+    'config.toml.example',
+    str(DISTPATH) + '/easyauth-emulator/config.toml.example',
 )
