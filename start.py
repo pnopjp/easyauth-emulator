@@ -720,7 +720,7 @@ def main() -> None:
 
     # ---- Apply environment variable overrides (e.g. from VS Code extension) --
     for key, val in os.environ.items():
-        if any(key.startswith(p) for p in ('IDP_', 'SITE_', 'APP_', 'OAUTH2_PROXY_', 'SAMPLE_APP_')):
+        if any(key.startswith(p) for p in ('IDP_', 'SITE_', 'APP_', 'OAUTH2_PROXY_', 'SAMPLE_APP_', 'TLS_')):
             env[key] = val
 
     if not config_file.exists() and not any(k.startswith('IDP_') for k in env):
@@ -783,6 +783,25 @@ def main() -> None:
         default_whitelist = f"{site_host}:{site_port}"
 
     whitelist_domain = _get(env, "OAUTH2_PROXY_WHITELIST_DOMAIN", default_whitelist)
+
+    # ---- TLS certificate validation ----------------------------------------
+    tls_cert = _get(env, "TLS_CERT_FILE", "").strip()
+    tls_key  = _get(env, "TLS_KEY_FILE",  "").strip()
+    tls_enabled = bool(tls_cert and tls_key)
+
+    if tls_enabled:
+        if not Path(tls_cert).exists():
+            _die(f"TLS_CERT_FILE not found: {tls_cert}")
+        if not Path(tls_key).exists():
+            _die(f"TLS_KEY_FILE not found: {tls_key}")
+        if not site_url.startswith("https://"):
+            print(
+                '[start] WARNING: TLS_CERT_FILE/TLS_KEY_FILE are set but SITE_URL does not use https://. '
+                'Set SITE_URL = "https://..." for correct OAuth2 redirect URLs.',
+                file=sys.stderr,
+            )
+        if not _get(env, "OAUTH2_PROXY_COOKIE_SECURE"):
+            env["OAUTH2_PROXY_COOKIE_SECURE"] = "true"
 
     # ---- Trusted proxy IPs for --reverse-proxy --------------------------------
     # Default to localhost (IPv4 + IPv6) when APP_UPSTREAM points to any loopback address.

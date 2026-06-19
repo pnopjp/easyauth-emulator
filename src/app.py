@@ -6,6 +6,7 @@ import http.client
 import json
 import os
 import re
+import ssl
 import sys
 import tomllib
 from http.cookies import SimpleCookie
@@ -185,7 +186,11 @@ def _parse_bool_cfg(name: str, default: str = "false") -> bool:
 
 
 DEBUG_HEADERS_ENDPOINT_ENABLED = _parse_bool_cfg("DEBUG_HEADERS_ENDPOINT_ENABLED")
-COOKIE_SECURE = _parse_bool_cfg("OAUTH2_PROXY_COOKIE_SECURE")
+TLS_CERT_FILE = (_cfg("TLS_CERT_FILE") or "").strip()
+TLS_KEY_FILE  = (_cfg("TLS_KEY_FILE")  or "").strip()
+_TLS_ENABLED  = bool(TLS_CERT_FILE and TLS_KEY_FILE)
+_DEFAULT_PROTO = "https" if _TLS_ENABLED else "http"
+COOKIE_SECURE = _parse_bool_cfg("OAUTH2_PROXY_COOKIE_SECURE") or _TLS_ENABLED
 
 
 def _parse_skip_routes(raw: str) -> "list[tuple[str, re.Pattern]]":
@@ -604,7 +609,7 @@ class _Handler(BaseHTTPRequestHandler):
             idp,
             cookie=self._header("Cookie"),
             real_ip=self._client_ip(),
-            proto=self._header("X-Forwarded-Proto") or "http",
+            proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
             host=self._header("Host"),
             uri=self.path,
         )
@@ -754,7 +759,7 @@ class _Handler(BaseHTTPRequestHandler):
                 idp,
                 cookie=self._header("Cookie"),
                 real_ip=self._client_ip(),
-                proto=self._header("X-Forwarded-Proto") or "http",
+                proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
                 host=self._header("Host"),
                 uri=self.path,
             ) or {}
@@ -816,7 +821,7 @@ class _Handler(BaseHTTPRequestHandler):
             idp,
             cookie=self._header("Cookie"),
             real_ip=self._client_ip(),
-            proto=self._header("X-Forwarded-Proto") or "http",
+            proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
             host=self._header("Host"),
             uri=self.path,
         )
@@ -825,7 +830,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         extra: dict[str, str] = {
             "X-Real-IP":               self._client_ip(),
-            "X-Forwarded-Proto":       self._header("X-Forwarded-Proto") or "http",
+            "X-Forwarded-Proto":       self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
             "X-Forwarded-Host":        self._header("Host"),
             "X-MS-CLIENT-PRINCIPAL-IDP":  _idp_auth_provider(idp),
             "X-Easyauth-User-Id-Claim":   _idp_user_id_claim(idp),
@@ -842,7 +847,17 @@ class _Handler(BaseHTTPRequestHandler):
 def main() -> None:
     port = int(SITE_PORT)
     server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)
-    print(f"[app] Listening on http://0.0.0.0:{port}")
+    if _TLS_ENABLED:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        try:
+            ctx.load_cert_chain(TLS_CERT_FILE, TLS_KEY_FILE)
+        except Exception as exc:
+            print(f"[app] ERROR: Failed to load TLS certificate: {exc}", file=sys.stderr)
+            sys.exit(1)
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        print(f"[app] Listening on https://0.0.0.0:{port}")
+    else:
+        print(f"[app] Listening on http://0.0.0.0:{port}")
     server.serve_forever()
 
 

@@ -97,32 +97,46 @@
             "order": 2,
             "markdownDescription": "`SITE_PORT`: Public port of the EasyAuth gateway."
           },
-          "easyauth.defaultIdp": {
+          "easyauth.tls.certFile": {
             "type": "string",
             "default": "",
             "scope": "resource",
             "order": 3,
+            "markdownDescription": "`TLS_CERT_FILE`: Path to the TLS server certificate (PEM format). Set together with `TLS_KEY_FILE` to enable HTTPS. Required for Facebook Login."
+          },
+          "easyauth.tls.keyFile": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 4,
+            "markdownDescription": "`TLS_KEY_FILE`: Path to the TLS private key (PEM format). Set together with `TLS_CERT_FILE` to enable HTTPS. Required for Facebook Login."
+          },
+          "easyauth.defaultIdp": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 5,
             "markdownDescription": "`DEFAULT_IDP`: Default IDP when `/.auth/login` is accessed. Must match a name in the configured IDPs. Leave empty to auto-select when only one IDP is configured, or to show the selection screen when multiple IDPs are configured."
           },
           "easyauth.skipAuthRoutes": {
             "type": "string",
             "default": "",
             "scope": "resource",
-            "order": 4,
+            "order": 6,
             "markdownDescription": "`SKIP_AUTH_ROUTES`: Routes that bypass authentication and are forwarded directly to upstream. Comma-separated list of `[METHOD=]REGEX` patterns.\n\n**Example:** `GET=^/health$,^/public/`"
           },
           "easyauth.debugHeadersEndpointEnabled": {
             "type": "boolean",
             "default": false,
             "scope": "resource",
-            "order": 5,
+            "order": 7,
             "markdownDescription": "`DEBUG_HEADERS_ENDPOINT_ENABLED`: Enable `GET /.debug/headers` endpoint to inspect computed auth headers."
           },
           "easyauth.idpSelectIcons": {
             "type": "string",
             "default": "simple",
             "scope": "resource",
-            "order": 6,
+            "order": 8,
             "enum": [
               "simple",
               "generic",

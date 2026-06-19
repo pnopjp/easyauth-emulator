@@ -52,11 +52,11 @@ No additional runtime installation is needed — the emulator binary is bundled 
 
 ### 1. Configure your identity provider
 
-Open your workspace settings (`Ctrl+,` → search `easyauth`) and fill in the Client ID and Issuer URL for your IdP. See [Supported Identity Providers](#supported-identity-providers) for the required settings per provider.
+Open your workspace settings (`Ctrl`+`,` → search `easyauth`) and fill in the Client ID and Issuer URL for your IdP. See [Supported Identity Providers](#supported-identity-providers) for the required settings per provider.
 
 ### 2. Store the client secret
 
-Run **EasyAuth Emulator: Set Client Secret** from the Command Palette (`Ctrl+Shift+P`) and enter the client secret for the IdP you configured in step 1. The secret is stored in VS Code's SecretStorage API (backed by the OS keychain — Windows Credential Manager on Windows) — never in settings files.
+Run **EasyAuth Emulator: Set Client Secret** from the Command Palette (`Ctrl`+`Shift`+`P`) and enter the client secret for the IdP you configured in step 1. The secret is stored in VS Code's SecretStorage API (backed by the OS keychain — Windows Credential Manager on Windows) — never in settings files.
 
 ### 3. Register the callback URL
 
@@ -67,6 +67,8 @@ http://localhost:8080/oauth2/callback
 ```
 
 If you changed `easyauth.site.port`, use that port instead.
+
+> **GitHub and Facebook** have additional setup requirements. See [GitHub Provider Notes](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#github-provider-notes) and [Facebook Provider Notes](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#facebook-provider-notes) in the configuration reference.
 
 ---
 
@@ -94,7 +96,7 @@ The status bar item in the bottom-left corner shows the emulator state at a glan
 
 ## Commands
 
-All commands are available from the Command Palette (`Ctrl+Shift+P`):
+All commands are available from the Command Palette (`Ctrl`+`Shift`+`P`):
 
 | Command | Description |
 | --- | --- |
@@ -164,6 +166,8 @@ Available fields per entry:
 
 ## Configuration Reference
 
+For the full parameter reference including all options, see [docs/configuration-reference.md](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md).
+
 ### Extension behavior
 
 | Setting | Default | Description |
@@ -181,6 +185,8 @@ Available fields per entry:
 | --- | --- | --- |
 | `easyauth.site.url` | `http://localhost` | Public base URL (used to build the OAuth2 callback URL) |
 | `easyauth.site.port` | `8080` | Public port of the EasyAuth gateway |
+| `easyauth.tls.certFile` | `""` | Path to the TLS certificate file (PEM). Set with `tls.keyFile` to enable HTTPS. Required for Facebook Login. |
+| `easyauth.tls.keyFile` | `""` | Path to the TLS private key file (PEM). Set with `tls.certFile` to enable HTTPS. Required for Facebook Login. |
 | `easyauth.defaultIdp` | `""` | Default IdP when `/.auth/login` is accessed |
 | `easyauth.skipAuthRoutes` | `""` | Routes that bypass auth — comma-separated `[METHOD=]REGEX` patterns |
 | `easyauth.debugHeadersEndpointEnabled` | `false` | Enable `GET /.debug/headers` to inspect injected headers |

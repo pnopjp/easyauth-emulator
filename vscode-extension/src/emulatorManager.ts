@@ -275,6 +275,10 @@ export class EmulatorManager implements vscode.Disposable {
         if (siteUrl) extra['SITE_URL'] = siteUrl;
         const sitePort = config.get<number | null>('site.port', null);
         if (sitePort !== null) extra['SITE_PORT'] = String(sitePort);
+        const tlsCertFile = config.get<string>('tls.certFile', '').trim();
+        if (tlsCertFile) extra['TLS_CERT_FILE'] = tlsCertFile;
+        const tlsKeyFile = config.get<string>('tls.keyFile', '').trim();
+        if (tlsKeyFile) extra['TLS_KEY_FILE'] = tlsKeyFile;
 
         // Global IDP settings
         const defaultIdp = config.get<string>('defaultIdp', '').trim();

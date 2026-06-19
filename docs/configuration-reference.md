@@ -85,12 +85,22 @@ oauth2-proxy's GitHub provider calls the GitHub `/user/emails` and `/user/orgs` 
 
 Without this permission, login fails with a `500 Internal Server Error` in the browser. Enabling `OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR = true` reveals the underlying cause: `unexpected status "403": {"message":"Resource not accessible by integration"}`.
 
+### Facebook Provider Notes
+
+#### Email permission
+
+oauth2-proxy's Facebook provider calls the Graph API (`/me?fields=name,email`) during session creation and requires the `email` field. The emulator sets `public_profile email` as the default scopes automatically, but the `email` permission must be explicitly added to your app. Go to **App Dashboard → Permissions and Features**, find `email`, and click **Add**. Without this step, the OAuth flow is interrupted mid-login with a Facebook error page that includes the message `Invalid Scopes: email`. Enabling `OAUTH2_PROXY_REQUEST_LOGGING = true` reveals `error_code=100` in the logged callback URL.
+
+#### HTTPS required
+
+Facebook Login requires the redirect URI to use HTTPS. Configure `TLS_CERT_FILE` and `TLS_KEY_FILE` and set `SITE_URL` to an `https://` URL before testing. For local development, setting `SITE_URL` to `https://site.localhost` and registering `https://site.localhost:<port>/oauth2/callback` in the Facebook app's valid OAuth redirect URIs works well. A certificate for `site.localhost` can be generated with mkcert (see [Enabling HTTPS](#enabling-https-tls) below).
+
 ### oauth2-proxy Settings
 
 | Parameter | Required | Default | Description |
 | --- | :---: | --- | --- |
 | `OAUTH2_PROXY_COOKIE_SECRET` | | Auto-generated | Secret used to sign oauth2-proxy session cookies. When not set, a secret is generated on first startup and appended to `config.toml`, so the same value is reused on subsequent restarts. |
-| `OAUTH2_PROXY_COOKIE_SECURE` | | `false` | Sets the `Secure` flag on session cookies. Set to `true` for HTTPS deployments. |
+| `OAUTH2_PROXY_COOKIE_SECURE` | | `false` | Sets the `Secure` flag on session cookies. Automatically set to `true` when HTTPS is enabled via `TLS_CERT_FILE`/`TLS_KEY_FILE`. |
 | `OAUTH2_PROXY_PORT_BASE` | | `4180` | Base port for internal oauth2-proxy instances. Each IDP uses a consecutive port starting from this value (e.g. `4180`, `4181`, …). |
 | `OAUTH2_PROXY_WHITELIST_DOMAIN` | | Derived from `SITE_URL`/`SITE_PORT` | Allowed domain for redirect targets. |
 | `OAUTH2_PROXY_TRUSTED_PROXY_IP` | | `127.0.0.1,::1` when `APP_UPSTREAM` is localhost | Comma-separated list of trusted reverse-proxy IP addresses or CIDRs from which `X-Forwarded-*` headers are accepted. Auto-set to `127.0.0.1,::1` when `APP_UPSTREAM` points to `localhost`, `127.0.0.1`, or `[::1]`. Set explicitly for non-local setups such as Docker (e.g. `172.17.0.0/16`). |
@@ -118,7 +128,55 @@ Version management behavior:
 
 | Parameter | Required | Default | Description |
 | --- | :---: | --- | --- |
-| `SSL_CA_BUNDLE` | | — | Path to a custom CA certificate bundle (PEM format). Normally not needed — the OS certificate store (Windows, macOS, Linux) is used automatically via [truststore](https://github.com/sethmlarson/truststore). Set this only when the required CA is not in the OS trust store, for example on Linux systems where the corporate CA cannot be added to the system store. |
+| `TLS_CERT_FILE` | | — | Path to the TLS server certificate (PEM format). When set together with `TLS_KEY_FILE`, the emulator accepts inbound requests over HTTPS. |
+| `TLS_KEY_FILE` | | — | Path to the TLS private key (PEM format). When set together with `TLS_CERT_FILE`, the emulator accepts inbound requests over HTTPS. |
+| `SSL_CA_BUNDLE` | | — | Path to a custom CA certificate bundle (PEM format). Used for outbound HTTPS connections the emulator makes to GitHub (oauth2-proxy downloads). Normally not needed — the OS certificate store (Windows, macOS, Linux) is used automatically via [truststore](https://github.com/sethmlarson/truststore). Set this only when your network has SSL inspection (MITM proxy) and the proxy CA cannot be added to the OS trust store, for example on Linux without root access. |
+
+#### Enabling HTTPS (TLS)
+
+Set `TLS_CERT_FILE` and `TLS_KEY_FILE` to make the gateway listen on HTTPS. Using `site.localhost` as the host is recommended (required for Facebook Login).
+
+Modern browsers resolve `*.localhost` to `127.0.0.1` automatically (RFC 6761), so no hosts file entry is needed for browser access. Non-browser HTTP clients may require one:
+
+```text
+# C:\Windows\System32\drivers\etc\hosts (Windows) or /etc/hosts (macOS/Linux)
+127.0.0.1  site.localhost
+```
+
+Update `config.toml`:
+
+```toml
+SITE_URL      = "https://site.localhost"
+SITE_PORT     = "8443"
+TLS_CERT_FILE = "./server.crt"
+TLS_KEY_FILE  = "./server.key"
+```
+
+> Update the redirect URI in your IdP app registration to `https://site.localhost:8443/oauth2/callback`.
+
+`OAUTH2_PROXY_COOKIE_SECURE` is automatically set to `true` when TLS is enabled and the option is not explicitly configured.
+
+##### Recommended: generate a certificate with mkcert
+
+[mkcert](https://github.com/FiloSottile/mkcert) generates locally-trusted development certificates by registering a CA in the OS certificate store. No browser warnings.
+
+Available at: [https://github.com/FiloSottile/mkcert](https://github.com/FiloSottile/mkcert)
+
+```sh
+mkcert -install  # register the CA (first time only)
+mkcert -cert-file server.crt -key-file server.key site.localhost
+```
+
+Place the generated `server.crt` and `server.key` at the paths specified in `config.toml`.
+
+##### Alternative: self-signed certificate with openssl
+
+```sh
+openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
+  -sha256 -days 365 -nodes -subj "/CN=site.localhost"
+```
+
+Self-signed certificates cause a browser security warning.
 
 ### Verification App Settings
 

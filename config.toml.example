@@ -37,7 +37,15 @@ DEBUG_HEADERS_ENDPOINT_ENABLED = false
 
 # ---- Network / SSL settings -------------------------------------------------
 
+# TLS server certificate and private key (PEM format).
+# When both are set, the gateway accepts inbound requests over HTTPS.
+# Also set SITE_URL = "https://..." and update the IdP redirect URI accordingly.
+# See docs/configuration-reference.md for certificate setup instructions (mkcert recommended).
+# TLS_CERT_FILE = "./server.crt"
+# TLS_KEY_FILE  = "./server.key"
+
 # Path to a custom CA certificate bundle (PEM format).
+# Used for outbound HTTPS connections the emulator makes to GitHub (oauth2-proxy downloads).
 # Normally not needed — the OS certificate store (Windows, macOS, Linux) is used
 # automatically. Set this only when the required CA is not in the OS trust store.
 # Example: SSL_CA_BUNDLE = "C:/certs/corporate-ca.pem"
@@ -49,8 +57,8 @@ DEBUG_HEADERS_ENDPOINT_ENABLED = false
 # To rotate the secret (which invalidates all existing sessions), replace the value below.
 OAUTH2_PROXY_COOKIE_SECRET = ""
 
-# Set to false for plain HTTP (local development without TLS).
-OAUTH2_PROXY_COOKIE_SECURE = false
+# Secure flag on session cookies. Auto-enabled when TLS_CERT_FILE/TLS_KEY_FILE are set.
+# OAUTH2_PROXY_COOKIE_SECURE = false
 
 # Base port for internal oauth2-proxy instances.
 # Each IDP uses a consecutive port starting from this value (e.g. 4180, 4181, ...).

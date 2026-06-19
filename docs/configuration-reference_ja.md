@@ -85,12 +85,22 @@ oauth2-proxy の GitHub プロバイダーはセッション作成時に GitHub 
 
 この権限がない場合、ブラウザには `500 Internal Server Error` が表示されてログインに失敗します。`OAUTH2_PROXY_SHOW_DEBUG_ON_ERROR = true` を設定すると、詳細なエラー原因として `unexpected status "403": {"message":"Resource not accessible by integration"}` が確認できます。
 
+### Facebook プロバイダーに関する注意
+
+#### email パーミッション
+
+oauth2-proxy の Facebook プロバイダーはセッション作成時に Graph API（`/me?fields=name,email`）を呼び出すため、`email` フィールドが必要です。エミュレーターは `public_profile email` をデフォルトスコープとして自動設定しますが、`email` パーミッションをアプリに明示的に追加する必要があります。**App Dashboard → Permissions and Features** で `email` を見つけて **Add** をクリックしてください。この設定を行わないと、ログインの途中で `Invalid Scopes: email` というメッセージを含む Facebook のエラー画面が表示されてフローが中断されます。`OAUTH2_PROXY_REQUEST_LOGGING = true` を設定すると、ログに記録されるコールバック URL に `error_code=100` が含まれることで原因を確認できます。
+
+#### HTTPS が必須
+
+Facebook Login はリダイレクト URI に HTTPS を要求します。`TLS_CERT_FILE` と `TLS_KEY_FILE` を設定し、`SITE_URL` を `https://` の URL に変更してからテストしてください。ローカル開発では、`SITE_URL` を `https://site.localhost` に設定し、Facebook アプリの有効な OAuth リダイレクト URI に `https://site.localhost:<port>/oauth2/callback` を登録すると便利です。証明書は mkcert で発行できます（後述の「[HTTPS (TLS) を有効にする](#https-tls-を有効にする)」を参照）。
+
 ### oauth2-proxy 設定
 
 | パラメーター | 必須 | 既定値 | 説明 |
 | --- | :---: | --- | --- |
 | `OAUTH2_PROXY_COOKIE_SECRET` | | 自動生成 | oauth2-proxy のセッション cookie 署名シークレット。未設定時は起動時に自動生成して `config.toml` に追記保存される。再起動後も同じ値が使われる。 |
-| `OAUTH2_PROXY_COOKIE_SECURE` | | `false` | セッション cookie に `Secure` フラグを付与するか。HTTPS 配備時は `true` に設定。 |
+| `OAUTH2_PROXY_COOKIE_SECURE` | | `false` | セッション cookie に `Secure` フラグを付与するか。`TLS_CERT_FILE`/`TLS_KEY_FILE` で HTTPS を有効にした場合は未設定でも自動的に `true` になります。 |
 | `OAUTH2_PROXY_PORT_BASE` | | `4180` | 内部 oauth2-proxy インスタンスのベースポート。各 IdP はこの値から連番でポートを使用（例: `4180`、`4181`、…）。 |
 | `OAUTH2_PROXY_WHITELIST_DOMAIN` | | `SITE_URL`/`SITE_PORT` から導出 | リダイレクト先として許可するドメイン。 |
 | `OAUTH2_PROXY_TRUSTED_PROXY_IP` | | `APP_UPSTREAM` が localhost の場合 `127.0.0.1,::1` | `X-Forwarded-*` ヘッダーを信頼するリバースプロキシの IP アドレスまたは CIDR（カンマ区切り）。`APP_UPSTREAM` が `localhost`・`127.0.0.1`・`[::1]` を指している場合は自動的に `127.0.0.1,::1` を設定。Docker などローカル以外の環境では明示的に指定（例: `172.17.0.0/16`）。 |
@@ -118,7 +128,55 @@ oauth2-proxy の GitHub プロバイダーはセッション作成時に GitHub 
 
 | パラメーター | 必須 | 既定値 | 説明 |
 | --- | :---: | --- | --- |
-| `SSL_CA_BUNDLE` | | — | カスタム CA 証明書バンドル（PEM 形式）のパス。通常は不要 — [truststore](https://github.com/sethmlarson/truststore) によって OS の証明書ストア（Windows・macOS・Linux）が自動的に参照されます。OS のトラストストアに必要な CA が登録できない場合（例: ルート権限のない Linux 環境）にのみ設定してください。 |
+| `TLS_CERT_FILE` | | — | TLS サーバー証明書（PEM 形式）のパス。`TLS_KEY_FILE` とともに設定すると、エミュレーターが HTTPS でリクエストを受け付けます。 |
+| `TLS_KEY_FILE` | | — | TLS 秘密鍵（PEM 形式）のパス。`TLS_CERT_FILE` とともに設定すると、エミュレーターが HTTPS でリクエストを受け付けます。 |
+| `SSL_CA_BUNDLE` | | — | カスタム CA 証明書バンドル（PEM 形式）のパス。エミュレーター自身が GitHub へ HTTPS 接続する際（oauth2-proxy のダウンロード）に使用します。通常は不要 — [truststore](https://github.com/sethmlarson/truststore) によって OS の証明書ストア（Windows・macOS・Linux）が自動的に参照されます。社内ネットワークに SSL インスペクション（MITM プロキシ）があり、そのプロキシの CA を OS のストアに追加できない場合（例: Linux でルート権限がない環境）にのみ設定してください。 |
+
+#### HTTPS (TLS) を有効にする
+
+`TLS_CERT_FILE` と `TLS_KEY_FILE` を設定すると、ゲートウェイが HTTPS でリッスンします。ホストには `site.localhost` の使用を推奨します（Facebook Login では必須）。
+
+モダンブラウザは RFC 6761 に従い `*.localhost` を自動的に `127.0.0.1` に解決するため、ブラウザでアクセスする場合は hosts ファイルへの追加は不要です。ブラウザ以外の HTTP クライアントでアクセスする場合は必要になることがあります:
+
+```text
+# Windows: C:\Windows\System32\drivers\etc\hosts  /  macOS・Linux: /etc/hosts
+127.0.0.1  site.localhost
+```
+
+`config.toml` を更新する:
+
+```toml
+SITE_URL      = "https://site.localhost"
+SITE_PORT     = "8443"
+TLS_CERT_FILE = "./server.crt"
+TLS_KEY_FILE  = "./server.key"
+```
+
+> IdP のアプリ登録（リダイレクト URI）も `https://site.localhost:8443/oauth2/callback` に更新してください。
+
+`OAUTH2_PROXY_COOKIE_SECURE` は TLS 有効時に未設定であれば自動的に `true` になります。
+
+##### 推奨: mkcert による証明書生成
+
+[mkcert](https://github.com/FiloSottile/mkcert) を使うと、OS の証明書ストアに信頼済み CA を登録した開発用証明書を生成できます。ブラウザ警告が出ません。
+
+入手先: [https://github.com/FiloSottile/mkcert](https://github.com/FiloSottile/mkcert)
+
+```sh
+mkcert -install  # CA をシステム証明書ストアに登録（初回のみ）
+mkcert -cert-file server.crt -key-file server.key site.localhost
+```
+
+生成した `server.crt` / `server.key` を `config.toml` で指定したパスに配置してください。
+
+##### 代替: openssl による自己署名証明書
+
+```sh
+openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
+  -sha256 -days 365 -nodes -subj "/CN=site.localhost"
+```
+
+自己署名証明書はブラウザに警告が表示されます。
 
 ### 動作確認用アプリ設定
 

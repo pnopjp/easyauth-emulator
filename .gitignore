@@ -6,5 +6,6 @@ dist/
 __pycache__/
 *.pyc
 __*/
+.cert/
 !vscode-extension/tests/__mocks__/
 !vscode-extension/tests/__mocks__/**
