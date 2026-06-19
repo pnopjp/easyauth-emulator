@@ -180,6 +180,13 @@ http://localhost:8080/oauth2/callback
 
 すべてのパラメーターの詳細については [docs/configuration-reference_ja.md](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference_ja.md) を参照してください。
 
+### `.vscode/easyauth.toml`（オプション）
+
+拡張機能は起動時に常に `--config .vscode/easyauth.toml` をエミュレーターに渡します。
+
+- **ファイルが存在する場合:** ベース設定として読み込まれます。VS Code 設定 UI で公開されていない高度なオプション（`config.toml` 形式で指定するパラメーター）を使いたい場合に活用できます。VS Code 設定（`settings.json`）の値は環境変数経由でさらに上書きします。
+- **ファイルが存在しない場合:** プロジェクトルートの `config.toml` を自動探索しないよう抑制されます（スタンドアローン用 `config.toml` を意図せず読み込まないための動作）。
+
 ### 拡張機能の動作
 
 | 設定 | デフォルト | 説明 |

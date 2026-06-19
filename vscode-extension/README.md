@@ -168,6 +168,13 @@ Available fields per entry:
 
 For the full parameter reference including all options, see [docs/configuration-reference.md](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md).
 
+### `.vscode/easyauth.toml` (optional)
+
+The extension always passes `--config .vscode/easyauth.toml` to the emulator on startup.
+
+- **If the file exists:** It is loaded as the base configuration. Use this to set advanced options (parameters available in `config.toml` format) not exposed in the VS Code settings UI. Values from VS Code settings (`settings.json`) override it via environment variables.
+- **If the file does not exist:** Auto-discovery of `config.toml` in the project root is suppressed (prevents accidentally loading a standalone `config.toml` from your workspace).
+
 ### Extension behavior
 
 | Setting | Default | Description |

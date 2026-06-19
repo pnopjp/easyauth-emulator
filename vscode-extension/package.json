@@ -407,7 +407,7 @@
             "default": [],
             "scope": "resource",
             "order": 1,
-            "markdownDescription": "Custom OIDC providers (e.g. LINE, Auth0, Salesforce). Each entry is added to `IDP_LIST` and mapped to `IDP_<NAME>_*` environment variables, where `<NAME>` is the uppercased `name` field.\n\n**Required fields per entry:** `name`, `clientId`, `oidcIssuerUrl`\n\nClient secrets must be registered separately via the **EasyAuth Emulator: Set Client Secret** command (stored encrypted in the OS keychain).\n\n**Example:**\n```json\n[\n  {\n    \"name\": \"line\",\n    \"displayName\": \"LINE\",\n    \"clientId\": \"your-client-id\",\n    \"oidcIssuerUrl\": \"https://access.line.me\"\n  },\n  {\n    \"name\": \"auth0\",\n    \"displayName\": \"Auth0\",\n    \"clientId\": \"your-client-id\",\n    \"oidcIssuerUrl\": \"https://your-tenant.auth0.com\"\n  }\n]\n```",
+            "markdownDescription": "Custom OIDC providers (e.g. Auth0, Salesforce). Each entry is added to `IDP_LIST` and mapped to `IDP_<NAME>_*` environment variables, where `<NAME>` is the uppercased `name` field.\n\n**Required fields per entry:** `name`, `clientId`, `oidcIssuerUrl`\n\nClient secrets must be registered separately via the **EasyAuth Emulator: Set Client Secret** command (stored encrypted in the OS keychain).\n\n**Example:**\n```jsonc\n{\n  \"easyauth.customIdps\": [\n    {\n      \"name\": \"my-provider\",\n      \"displayName\": \"My Provider\",\n      \"clientId\": \"your-client-id\",\n      \"oidcIssuerUrl\": \"https://your-provider.example.com\"\n    }\n  ]\n}\n```",
             "items": {
               "type": "object",
               "required": [
@@ -418,7 +418,7 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "description": "IDP identifier used in IDP_LIST (e.g. 'line', 'auth0'). Lowercase alphanumeric and hyphens only."
+                  "description": "IDP identifier used in IDP_LIST (e.g. 'auth0', 'salesforce'). Lowercase alphanumeric and hyphens only."
                 },
                 "displayName": {
                   "type": "string",
@@ -430,11 +430,11 @@
                 },
                 "oidcIssuerUrl": {
                   "type": "string",
-                  "description": "IDP_<NAME>_OIDC_ISSUER_URL: OIDC issuer URL (e.g. https://access.line.me)."
+                  "description": "IDP_<NAME>_OIDC_ISSUER_URL: OIDC issuer URL (e.g. https://your-tenant.auth0.com/)."
                 },
                 "authProvider": {
                   "type": "string",
-                  "description": "IDP_<NAME>_AUTH_PROVIDER: Value set in X-MS-CLIENT-PRINCIPAL-IDP header (e.g. 'line')."
+                  "description": "IDP_<NAME>_AUTH_PROVIDER: Value set in X-MS-CLIENT-PRINCIPAL-IDP header (e.g. 'auth0')."
                 },
                 "authUserIdClaim": {
                   "type": "string",
@@ -467,7 +467,7 @@
                 },
                 "icon": {
                   "type": "string",
-                  "description": "IDP_<NAME>_ICON: Icon shown on the IdP selection page. Specify a Simple Icons slug (e.g. 'microsoft') or an image URL."
+                  "description": "IDP_<NAME>_ICON: Icon shown on the IdP selection page. Specify a Simple Icons slug (e.g. 'auth0') or an image URL."
                 }
               },
               "additionalProperties": false
