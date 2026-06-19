@@ -18,7 +18,6 @@ EasyAuth Emulator bridges that gap by running a compatible authentication gatewa
 
 ![How it works](https://raw.githubusercontent.com/pnopjp/easyauth-emulator/main/vscode-extension/images/flow.png)
 
-
 The extension auto-detects your app's listening port from `launch.json`, framework config files (`.env`, `launchSettings.json`, `application.properties`, …), or debug output — so no manual wiring is needed in most projects.
 
 ---
@@ -53,11 +52,11 @@ No additional runtime installation is needed — the emulator binary is bundled 
 
 ### 1. Configure your identity provider
 
-Open your workspace settings (`Ctrl+,` → search `easyauth`) and fill in the Client ID and Issuer URL for your IdP. See [Supported Identity Providers](#supported-identity-providers) for the required settings per provider.
+Open your workspace settings (`Ctrl`+`,` → search `easyauth`) and fill in the Client ID and Issuer URL for your IdP. See [Supported Identity Providers](#supported-identity-providers) for the required settings per provider.
 
 ### 2. Store the client secret
 
-Run **EasyAuth Emulator: Set Client Secret** from the Command Palette (`Ctrl+Shift+P`) and enter the client secret for the IdP you configured in step 1. The secret is stored in VS Code's SecretStorage API (backed by the OS keychain — Windows Credential Manager on Windows) — never in settings files.
+Run **EasyAuth Emulator: Set Client Secret** from the Command Palette (`Ctrl`+`Shift`+`P`) and enter the client secret for the IdP you configured in step 1. The secret is stored in VS Code's SecretStorage API (backed by the OS keychain — Windows Credential Manager on Windows) — never in settings files.
 
 ### 3. Register the callback URL
 
@@ -68,6 +67,8 @@ http://localhost:8080/oauth2/callback
 ```
 
 If you changed `easyauth.site.port`, use that port instead.
+
+> **GitHub and Facebook** have additional setup requirements. See [GitHub Provider Notes](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#github-provider-notes) and [Facebook Provider Notes](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#facebook-provider-notes) in the configuration reference.
 
 ---
 
@@ -95,7 +96,7 @@ The status bar item in the bottom-left corner shows the emulator state at a glan
 
 ## Commands
 
-All commands are available from the Command Palette (`Ctrl+Shift+P`):
+All commands are available from the Command Palette (`Ctrl`+`Shift`+`P`):
 
 | Command | Description |
 | --- | --- |
@@ -143,9 +144,36 @@ Add any OIDC-compatible provider via `easyauth.customIdps`:
 
 After adding a custom provider, store its client secret with **EasyAuth Emulator: Set Client Secret**.
 
+Available fields per entry:
+
+| Field | Required | Description |
+| --- | :---: | --- |
+| `name` | ✓ | IDP identifier used in `IDP_LIST` (lowercase alphanumeric and hyphens) |
+| `clientId` | ✓ | OAuth2 / OIDC client ID |
+| `oidcIssuerUrl` | ✓ | OIDC issuer URL (e.g. `https://your-provider.example.com`) |
+| `displayName` | | Label shown on the IdP selection screen |
+| `scopes` | | Space-separated OAuth2 scopes. Default: `openid profile email` |
+| `authUserIdClaim` | | JWT claim used as user ID. Default: `sub` |
+| `authProvider` | | Value set in `X-MS-CLIENT-PRINCIPAL-IDP` header |
+| `prompt` | | OIDC `prompt` parameter (`login`, `consent`, etc.) |
+| `codeChallengeMethod` | | PKCE code challenge method: `S256` or `plain` |
+| `logoutEndpoint` | | Override the IdP logout URL |
+| `skipClaimsFromProfileUrl` | | `true` to skip fetching claims from the userinfo endpoint |
+| `extraArgs` | | Space-separated extra options passed to oauth2-proxy (e.g. `"--allowed-group=my-group --oidc-extra-audience=myapp"`) |
+| `icon` | | Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug (e.g. `"microsoft"`) or an image URL. Has no effect when `IDP_SELECT_ICONS` is `generic` or `text`. |
+
 ---
 
 ## Configuration Reference
+
+For the full parameter reference including all options, see [docs/configuration-reference.md](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md).
+
+### `.vscode/easyauth.toml` (optional)
+
+The extension always passes `--config .vscode/easyauth.toml` to the emulator on startup.
+
+- **If the file exists:** It is loaded as the base configuration. Use this to set advanced options (parameters available in `config.toml` format) not exposed in the VS Code settings UI. Values from VS Code settings (`settings.json`) override it via environment variables.
+- **If the file does not exist:** Auto-discovery of `config.toml` in the project root is suppressed (prevents accidentally loading a standalone `config.toml` from your workspace).
 
 ### Extension behavior
 
@@ -164,6 +192,8 @@ After adding a custom provider, store its client secret with **EasyAuth Emulator
 | --- | --- | --- |
 | `easyauth.site.url` | `http://localhost` | Public base URL (used to build the OAuth2 callback URL) |
 | `easyauth.site.port` | `8080` | Public port of the EasyAuth gateway |
+| `easyauth.tls.certFile` | `""` | Path to the TLS certificate file (PEM). Set with `tls.keyFile` to enable HTTPS. Required for Facebook Login. |
+| `easyauth.tls.keyFile` | `""` | Path to the TLS private key file (PEM). Set with `tls.certFile` to enable HTTPS. Required for Facebook Login. |
 | `easyauth.defaultIdp` | `""` | Default IdP when `/.auth/login` is accessed |
 | `easyauth.skipAuthRoutes` | `""` | Routes that bypass auth — comma-separated `[METHOD=]REGEX` patterns |
 | `easyauth.debugHeadersEndpointEnabled` | `false` | Enable `GET /.debug/headers` to inspect injected headers |

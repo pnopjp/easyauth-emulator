@@ -76,6 +76,12 @@
             "default": false,
             "order": 6,
             "markdownDescription": "Print all resolved configuration values (secrets masked) on startup. Passes `--verbose` to the emulator process."
+          },
+          "easyauth.privateBrowser.command": {
+            "type": "string",
+            "default": "",
+            "order": 7,
+            "markdownDescription": "Command to launch a private/incognito browser window. The site URL is appended as the last argument.\n\n**Examples:**\n- `msedge --inprivate`\n- `chrome --incognito`\n- `firefox --private-window`\n\nLeave empty to hide the private browser button."
           }
         }
       },
@@ -97,32 +103,46 @@
             "order": 2,
             "markdownDescription": "`SITE_PORT`: Public port of the EasyAuth gateway."
           },
-          "easyauth.defaultIdp": {
+          "easyauth.tls.certFile": {
             "type": "string",
             "default": "",
             "scope": "resource",
             "order": 3,
+            "markdownDescription": "`TLS_CERT_FILE`: Path to the TLS server certificate (PEM format). Set together with `TLS_KEY_FILE` to enable HTTPS. Required for Facebook Login."
+          },
+          "easyauth.tls.keyFile": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 4,
+            "markdownDescription": "`TLS_KEY_FILE`: Path to the TLS private key (PEM format). Set together with `TLS_CERT_FILE` to enable HTTPS. Required for Facebook Login."
+          },
+          "easyauth.defaultIdp": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 5,
             "markdownDescription": "`DEFAULT_IDP`: Default IDP when `/.auth/login` is accessed. Must match a name in the configured IDPs. Leave empty to auto-select when only one IDP is configured, or to show the selection screen when multiple IDPs are configured."
           },
           "easyauth.skipAuthRoutes": {
             "type": "string",
             "default": "",
             "scope": "resource",
-            "order": 4,
+            "order": 6,
             "markdownDescription": "`SKIP_AUTH_ROUTES`: Routes that bypass authentication and are forwarded directly to upstream. Comma-separated list of `[METHOD=]REGEX` patterns.\n\n**Example:** `GET=^/health$,^/public/`"
           },
           "easyauth.debugHeadersEndpointEnabled": {
             "type": "boolean",
             "default": false,
             "scope": "resource",
-            "order": 5,
+            "order": 7,
             "markdownDescription": "`DEBUG_HEADERS_ENDPOINT_ENABLED`: Enable `GET /.debug/headers` endpoint to inspect computed auth headers."
           },
           "easyauth.idpSelectIcons": {
             "type": "string",
             "default": "simple",
             "scope": "resource",
-            "order": 6,
+            "order": 8,
             "enum": [
               "simple",
               "generic",
@@ -175,6 +195,20 @@
             "scope": "resource",
             "order": 6,
             "markdownDescription": "`IDP_ENTRA_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `preferred_username`."
+          },
+          "easyauth.entra.extraArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`IDP_ENTRA_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line. Example: `--allowed-group=my-group --oidc-extra-audience=myapp`."
+          },
+          "easyauth.entra.icon": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 8,
+            "markdownDescription": "`IDP_ENTRA_ICON`: Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug (e.g. `microsoft`) or an image URL."
           }
         }
       },
@@ -209,6 +243,20 @@
             "scope": "resource",
             "order": 5,
             "markdownDescription": "`IDP_GOOGLE_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `email`."
+          },
+          "easyauth.google.extraArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 6,
+            "markdownDescription": "`IDP_GOOGLE_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
+          },
+          "easyauth.google.icon": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`IDP_GOOGLE_ICON`: Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug or an image URL."
           }
         }
       },
@@ -243,6 +291,20 @@
             "scope": "resource",
             "order": 5,
             "markdownDescription": "`IDP_FACEBOOK_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `id`."
+          },
+          "easyauth.facebook.extraArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 6,
+            "markdownDescription": "`IDP_FACEBOOK_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
+          },
+          "easyauth.facebook.icon": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`IDP_FACEBOOK_ICON`: Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug or an image URL."
           }
         }
       },
@@ -277,6 +339,20 @@
             "scope": "resource",
             "order": 5,
             "markdownDescription": "`IDP_APPLE_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `email`."
+          },
+          "easyauth.apple.extraArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 6,
+            "markdownDescription": "`IDP_APPLE_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
+          },
+          "easyauth.apple.icon": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`IDP_APPLE_ICON`: Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug or an image URL."
           }
         }
       },
@@ -311,6 +387,20 @@
             "scope": "resource",
             "order": 5,
             "markdownDescription": "`IDP_GITHUB_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `login`."
+          },
+          "easyauth.github.extraArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 6,
+            "markdownDescription": "`IDP_GITHUB_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
+          },
+          "easyauth.github.icon": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`IDP_GITHUB_ICON`: Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug or an image URL."
           }
         }
       },
@@ -323,7 +413,7 @@
             "default": [],
             "scope": "resource",
             "order": 1,
-            "markdownDescription": "Custom OIDC providers (e.g. LINE, Auth0, Salesforce). Each entry is added to `IDP_LIST` and mapped to `IDP_<NAME>_*` environment variables, where `<NAME>` is the uppercased `name` field.\n\n**Required fields per entry:** `name`, `clientId`, `oidcIssuerUrl`\n\nClient secrets must be registered separately via the **EasyAuth Emulator: Set Client Secret** command (stored encrypted in the OS keychain).\n\n**Example:**\n```json\n[\n  {\n    \"name\": \"line\",\n    \"displayName\": \"LINE\",\n    \"clientId\": \"your-client-id\",\n    \"oidcIssuerUrl\": \"https://access.line.me\"\n  },\n  {\n    \"name\": \"auth0\",\n    \"displayName\": \"Auth0\",\n    \"clientId\": \"your-client-id\",\n    \"oidcIssuerUrl\": \"https://your-tenant.auth0.com\"\n  }\n]\n```",
+            "markdownDescription": "Custom OIDC providers (e.g. Auth0, Salesforce). Each entry is added to `IDP_LIST` and mapped to `IDP_<NAME>_*` environment variables, where `<NAME>` is the uppercased `name` field.\n\n**Required fields per entry:** `name`, `clientId`, `oidcIssuerUrl`\n\nClient secrets must be registered separately via the **EasyAuth Emulator: Set Client Secret** command (stored encrypted in the OS keychain).\n\n**Example:**\n```jsonc\n{\n  \"easyauth.customIdps\": [\n    {\n      \"name\": \"my-provider\",\n      \"displayName\": \"My Provider\",\n      \"clientId\": \"your-client-id\",\n      \"oidcIssuerUrl\": \"https://your-provider.example.com\"\n    }\n  ]\n}\n```",
             "items": {
               "type": "object",
               "required": [
@@ -334,7 +424,7 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "description": "IDP identifier used in IDP_LIST (e.g. 'line', 'auth0'). Lowercase alphanumeric and hyphens only."
+                  "description": "IDP identifier used in IDP_LIST (e.g. 'auth0', 'salesforce'). Lowercase alphanumeric and hyphens only."
                 },
                 "displayName": {
                   "type": "string",
@@ -346,11 +436,11 @@
                 },
                 "oidcIssuerUrl": {
                   "type": "string",
-                  "description": "IDP_<NAME>_OIDC_ISSUER_URL: OIDC issuer URL (e.g. https://access.line.me)."
+                  "description": "IDP_<NAME>_OIDC_ISSUER_URL: OIDC issuer URL (e.g. https://your-tenant.auth0.com/)."
                 },
                 "authProvider": {
                   "type": "string",
-                  "description": "IDP_<NAME>_AUTH_PROVIDER: Value set in X-MS-CLIENT-PRINCIPAL-IDP header (e.g. 'line')."
+                  "description": "IDP_<NAME>_AUTH_PROVIDER: Value set in X-MS-CLIENT-PRINCIPAL-IDP header (e.g. 'auth0')."
                 },
                 "authUserIdClaim": {
                   "type": "string",
@@ -376,6 +466,14 @@
                 "skipClaimsFromProfileUrl": {
                   "type": "boolean",
                   "description": "IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL: Skip fetching additional claims from the userinfo endpoint."
+                },
+                "extraArgs": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_EXTRA_ARGS: Space-separated extra flags appended verbatim to the oauth2-proxy command line (e.g. '--allowed-group=my-group --oidc-extra-audience=myapp')."
+                },
+                "icon": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_ICON: Icon shown on the IdP selection page. Specify a Simple Icons slug (e.g. 'auth0') or an image URL."
                 }
               },
               "additionalProperties": false
@@ -453,34 +551,127 @@
         }
       }
     ],
+    "views": {
+      "explorer": [
+        {
+          "id": "easyauth.statusView",
+          "name": "EasyAuth Emulator"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "easyauth.openSettings",
+          "when": "view == easyauth.statusView && easyauth.state == unconfigured",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.setSecret",
+          "when": "view == easyauth.statusView && easyauth.needsSecret",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.openInBrowser",
+          "when": "view == easyauth.statusView && easyauth.state == running",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.openInPrivateBrowser",
+          "when": "view == easyauth.statusView && easyauth.state == running && easyauth.privateBrowserConfigured",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.start",
+          "when": "view == easyauth.statusView && (easyauth.state == stopped || easyauth.state == error)",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.restart",
+          "when": "view == easyauth.statusView && (easyauth.state == running || easyauth.state == starting)",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.stop",
+          "when": "view == easyauth.statusView && (easyauth.state == running || easyauth.state == starting)",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.openOutput",
+          "when": "view == easyauth.statusView && (easyauth.state == running || easyauth.state == starting || easyauth.state == error)",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "easyauth.openSettings",
+          "when": "view == easyauth.statusView",
+          "group": "inline"
+        },
+        {
+          "command": "easyauth.setSecret",
+          "when": "view == easyauth.statusView",
+          "group": "inline"
+        },
+        {
+          "command": "easyauth.openOutput",
+          "when": "view == easyauth.statusView && (viewItem == easyauth.running || viewItem == easyauth.starting || viewItem == easyauth.error)"
+        }
+      ]
+    },
     "commands": [
       {
+        "command": "easyauth.openSettings",
+        "title": "EasyAuth Emulator: Open Settings",
+        "shortTitle": "Settings",
+        "icon": "$(gear)"
+      },
+      {
         "command": "easyauth.start",
-        "title": "EasyAuth Emulator: Start"
+        "title": "EasyAuth Emulator: Start",
+        "shortTitle": "Start",
+        "icon": "$(play)"
       },
       {
         "command": "easyauth.stop",
-        "title": "EasyAuth Emulator: Stop"
+        "title": "EasyAuth Emulator: Stop",
+        "shortTitle": "Stop",
+        "icon": "$(stop-circle)"
       },
       {
         "command": "easyauth.restart",
-        "title": "EasyAuth Emulator: Restart"
+        "title": "EasyAuth Emulator: Restart",
+        "shortTitle": "Restart",
+        "icon": "$(refresh)"
       },
       {
         "command": "easyauth.openOutput",
-        "title": "EasyAuth Emulator: Open Output"
+        "title": "EasyAuth Emulator: Open Output",
+        "shortTitle": "Show Output",
+        "icon": "$(output)"
       },
       {
         "command": "easyauth.openInBrowser",
-        "title": "EasyAuth Emulator: Open in Browser"
+        "title": "EasyAuth Emulator: Open in Browser",
+        "shortTitle": "Open in Browser",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "easyauth.openInPrivateBrowser",
+        "title": "EasyAuth Emulator: Open in Private Browser",
+        "shortTitle": "Open in Private Browser",
+        "icon": "$(eye-closed)"
       },
       {
         "command": "easyauth.setSecret",
-        "title": "EasyAuth Emulator: Set Client Secret"
+        "title": "EasyAuth Emulator: Set Client Secret",
+        "shortTitle": "Set Client Secret",
+        "icon": "$(key)"
       },
       {
         "command": "easyauth.clearSecret",
-        "title": "EasyAuth Emulator: Clear Client Secret"
+        "title": "EasyAuth Emulator: Clear Client Secret",
+        "shortTitle": "Clear Client Secret"
       }
     ]
   },

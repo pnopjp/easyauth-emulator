@@ -165,12 +165,12 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 
 ### 子プロセスのクリーンアップ
 
-(b) が `start.py` プロセスを kill すると、`start.py` の子プロセス（`oauth2-proxy`）も OS 機構により自動終了する。
+(b) がエミュレータープロセスを停止する際、`oauth2-proxy` の子プロセスも含めてプロセスツリー全体を終了させる。
 
-- **Windows：** Job Object（`KILL_ON_JOB_CLOSE`）により `start.py` 終了時に配下の全プロセスを終了
-- **Linux：** `prctl(PR_SET_PDEATHSIG, SIGTERM)` により親プロセス終了時に子プロセスへ SIGTERM を送信
+- **Windows：** `taskkill /F /T /PID <PID>` でプロセスツリーを強制終了
+- **Linux：** `kill -TERM <PID>` でシグナルを送信
 
-(b) は `start.py` を kill するだけでよく、`oauth2-proxy` を個別に管理する必要はない。
+(b) はエミュレーターの親プロセスに対してのみ終了操作を行えばよく、`oauth2-proxy` を個別に管理する必要はない。
 
 ---
 
@@ -237,9 +237,9 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 
 #### ポートスキャン仕様（優先度 5）
 
-- **スキャン起点：** 優先度 2〜3 で得られたヒントポート。取得できない場合は `easyauth.portScanBase`
+- **スキャン起点：** `easyauth.portScanBase`（`null` の場合はスキャンをスキップして優先度 6 へ）
 - **スキャン範囲：** 起点から `easyauth.portScanMax`（デフォルト: 5）ポート分
-- **方法：** デバッグセッション開始前後の TCP LISTEN ポートの差分
+- **方法：** 起点ポートから連続して TCP 接続を試み、応答があったポートを候補とする
 - **誤検知対策：** スキャン範囲を最大5ポートに絞ることで誤検知リスクを低減する。複数候補が残る場合はユーザー確認 UI（優先度 6）で解消する。
 
 #### ユーザー確認 UI（優先度 6）
@@ -263,6 +263,9 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 | `easyauth.upstreamPort` | number \| null | `null` | ポート手動指定（null = 自動検知） |
 | `easyauth.portScanMax` | number | `5` | ポートスキャンの最大試行数 |
 | `easyauth.portScanBase` | number \| null | `null` | スキャン起点（ヒントが取れない場合） |
+| `easyauth.verbose` | boolean | `false` | 起動時に全設定値を出力（シークレットはマスク） |
+
+上記のほか、IDP 設定（`easyauth.entra.*` / `easyauth.google.*` 等）、サイト設定（`easyauth.site.*`）、TLS 設定（`easyauth.tls.*`）、oauth2-proxy 設定（`easyauth.oauth2proxy.*`）など多数の設定が存在する。詳細は拡張機能の Configuration Reference を参照。
 
 > **バイナリパスについて:** 拡張機能は VSIX に同梱したバイナリを使用する。カスタムパス指定は不要。
 >
@@ -307,19 +310,19 @@ SecretStorage のキーはワークスペースフォルダの URI を含む。*
 easyauth-emulator [オプション]
 
 オプション:
-  --upstream-port PORT   APP_UPSTREAM のポート番号を上書き（設定ファイルより優先）
+  --app-upstream URL     APP_UPSTREAM を上書き（例: http://localhost:3000）
   --config PATH          設定ファイルのパスを指定（デフォルト: ./config.toml）
   --verbose / -v         起動時に全設定値を出力（シークレットはマスク）
 ```
 
-> **実装上の注意:** (b) は `APP_UPSTREAM` をコマンドライン引数 `--upstream-port` ではなく環境変数として渡す。(c) は `IDP_*`・`SITE_*`・`APP_*`・`OAUTH2_PROXY_*` プレフィックスの環境変数を設定ファイルより優先して読み込むため、(b) から IDP 設定・サイト設定・アップストリーム設定はすべて環境変数経由で渡される。
+> **(b) からの制御は環境変数経由:** (b) は `APP_UPSTREAM` を含む IDP 設定・サイト設定・アップストリーム設定をすべて環境変数として渡す。(c) は `IDP_*`・`SITE_*`・`APP_*`・`OAUTH2_PROXY_*` プレフィックスの環境変数を設定ファイルより優先して読み込む。`--app-upstream` は (c) を単体で使う場合のオプションである。
 
 ### 動作例
 
 config.toml に `APP_UPSTREAM = "http://localhost:3000"` が設定されている状態で:
 
 ```sh
-easyauth-emulator --upstream-port 8081
+easyauth-emulator --app-upstream http://localhost:8081
 ```
 
 → `http://localhost:8081` を APP_UPSTREAM として動作する。
@@ -328,19 +331,31 @@ easyauth-emulator --upstream-port 8081
 
 ## 10. VS Code ステータスバー
 
-| 状態 | 表示例 |
-| --- | --- |
-| `stopped` | `$(shield) EasyAuth: stopped` |
-| `unconfigured` | `$(warning) EasyAuth: no config` |
-| `starting` | `$(sync~spin) EasyAuth: starting...` |
-| `running` | `$(shield) EasyAuth: 8080:8081`（エミュレーターのリッスンポート:アップストリームポート） |
-| `error` | `$(error) EasyAuth: error` |
-
-クリックで Output Channel を開く。`running` 状態のクリックはブラウザでエミュレーターを開く。
+| 状態 | 表示例 | クリック動作 |
+| --- | --- | --- |
+| `stopped` | `$(shield) EasyAuth: stopped` | ポート検知して起動 |
+| `unconfigured` | `$(warning) EasyAuth: no config` | 拡張機能の設定画面を開く |
+| `starting` | `$(sync~spin) EasyAuth: starting...` | Output Channel を開く |
+| `running` | `$(shield) EasyAuth: 8080:8081`（リッスンポート:アップストリームポート） | ブラウザでエミュレーターを開く |
+| `error` | `$(error) EasyAuth: error` | 1回目: Output Channel を開く / 2回目以降: ポート検知して再起動 |
 
 ---
 
-## 11. 将来拡張
+## 11. コマンドパレットコマンド
+
+| コマンド | 説明 |
+| --- | --- |
+| `EasyAuth Emulator: Start` | ポート検知してエミュレーターを手動起動 |
+| `EasyAuth Emulator: Stop` | エミュレーターを停止 |
+| `EasyAuth Emulator: Restart` | エミュレーターを再起動 |
+| `EasyAuth Emulator: Open Output` | Output Channel を開く |
+| `EasyAuth Emulator: Open in Browser` | ブラウザでエミュレーターを開く |
+| `EasyAuth Emulator: Set Client Secret` | IDP クライアントシークレットを SecretStorage に保存 |
+| `EasyAuth Emulator: Clear Client Secret` | 保存済みクライアントシークレットを削除 |
+
+---
+
+## 12. 将来拡張
 
 | 対象 | 拡張機能の流用 | 方針 |
 | --- | --- | --- |

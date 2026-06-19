@@ -15,13 +15,16 @@ export class EmulatorManager implements vscode.Disposable {
     private startTimeout: ReturnType<typeof setTimeout> | null = null;
     private currentPort: number | null = null;
 
+    private readonly _onDidChangeState = new vscode.EventEmitter<EmulatorState>();
+    readonly onDidChangeState: vscode.Event<EmulatorState> = this._onDidChangeState.event;
+
     constructor(
         private readonly context: vscode.ExtensionContext,
         private readonly outputChannel: vscode.LogOutputChannel,
         private readonly statusBar: StatusBarManager,
         private readonly secretManager: SecretManager,
     ) {
-        statusBar.update(this.hasConfig() ? 'stopped' : 'unconfigured', null, null);
+        this.setState(this.hasConfig() ? 'stopped' : 'unconfigured');
     }
 
     isManaging(): boolean {
@@ -189,13 +192,16 @@ export class EmulatorManager implements vscode.Disposable {
 
     dispose(): void {
         void this.stop();
+        this._onDidChangeState.dispose();
     }
 
     private setState(state: EmulatorState): void {
         this.state = state;
         void vscode.commands.executeCommand('setContext', 'easyauth.running', state === 'running');
+        void vscode.commands.executeCommand('setContext', 'easyauth.state', state);
         const listenPort = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
         this.statusBar.update(state, listenPort, this.currentPort);
+        this._onDidChangeState.fire(state);
     }
 
     private clearStartTimeout(): void {
@@ -263,6 +269,14 @@ export class EmulatorManager implements vscode.Disposable {
         return customs.some(idp => idp.name?.trim() && idp.clientId?.trim());
     }
 
+    onConfigurationChanged(): void {
+        if (this.state === 'unconfigured' && this.hasConfig()) {
+            this.setState('stopped');
+        } else if (this.state === 'stopped' && !this.hasConfig()) {
+            this.setState('unconfigured');
+        }
+    }
+
     private async buildEnv(port: number): Promise<NodeJS.ProcessEnv> {
         const config = vscode.workspace.getConfiguration('easyauth');
         const extra: Record<string, string> = {};
@@ -275,6 +289,10 @@ export class EmulatorManager implements vscode.Disposable {
         if (siteUrl) extra['SITE_URL'] = siteUrl;
         const sitePort = config.get<number | null>('site.port', null);
         if (sitePort !== null) extra['SITE_PORT'] = String(sitePort);
+        const tlsCertFile = config.get<string>('tls.certFile', '').trim();
+        if (tlsCertFile) extra['TLS_CERT_FILE'] = tlsCertFile;
+        const tlsKeyFile = config.get<string>('tls.keyFile', '').trim();
+        if (tlsKeyFile) extra['TLS_KEY_FILE'] = tlsKeyFile;
 
         // Global IDP settings
         const defaultIdp = config.get<string>('defaultIdp', '').trim();
@@ -313,6 +331,10 @@ export class EmulatorManager implements vscode.Disposable {
             if (scopes) extra[`IDP_${envKey}_SCOPES`] = scopes;
             const authUserIdClaim = config.get<string>(`${idpName}.authUserIdClaim`, '').trim();
             if (authUserIdClaim) extra[`IDP_${envKey}_AUTH_USER_ID_CLAIM`] = authUserIdClaim;
+            const extraArgs = config.get<string>(`${idpName}.extraArgs`, '').trim();
+            if (extraArgs) extra[`IDP_${envKey}_EXTRA_ARGS`] = extraArgs;
+            const icon = config.get<string>(`${idpName}.icon`, '').trim();
+            if (icon) extra[`IDP_${envKey}_ICON`] = icon;
         }
 
         // Entra-specific: full OIDC issuer URL
@@ -334,6 +356,8 @@ export class EmulatorManager implements vscode.Disposable {
             codeChallengeMethod?: string;
             logoutEndpoint?: string;
             skipClaimsFromProfileUrl?: boolean;
+            extraArgs?: string;
+            icon?: string;
         }
         const customIdps = config.get<CustomIdp[]>('customIdps', []);
         for (const idp of customIdps) {
@@ -357,6 +381,8 @@ export class EmulatorManager implements vscode.Disposable {
             if (idp.codeChallengeMethod?.trim()) extra[`IDP_${envKey}_CODE_CHALLENGE_METHOD`] = idp.codeChallengeMethod.trim();
             if (idp.logoutEndpoint?.trim()) extra[`IDP_${envKey}_LOGOUT_ENDPOINT`] = idp.logoutEndpoint.trim();
             if (idp.skipClaimsFromProfileUrl) extra[`IDP_${envKey}_SKIP_CLAIMS_FROM_PROFILE_URL`] = 'true';
+            if (idp.extraArgs?.trim()) extra[`IDP_${envKey}_EXTRA_ARGS`] = idp.extraArgs.trim();
+            if (idp.icon?.trim()) extra[`IDP_${envKey}_ICON`] = idp.icon.trim();
         }
 
         if (idpList.length > 0) extra['IDP_LIST'] = idpList.join(',');

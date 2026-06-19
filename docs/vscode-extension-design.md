@@ -131,7 +131,7 @@ If multiple debug sessions start simultaneously, (c) is bound to the first sessi
     ↓
 (b) Port detection (see §6)
     ↓
-(b) Starts easyauth-emulator --upstream-port <PORT>  →  state: starting
+(b) Starts easyauth-emulator (APP_UPSTREAM passed via env)  →  state: starting
     ↓
 (b) Detects "All processes started" in stdout         →  state: running
     ↓                                (no detection within 30s → state: error)
@@ -151,7 +151,7 @@ If multiple debug sessions start simultaneously, (c) is bound to the first sessi
     ↓
 (b) Terminates old (c) process                        →  state: stopped
     ↓
-(b) Starts easyauth-emulator --upstream-port <NEW_PORT>  →  state: starting
+(b) Starts easyauth-emulator (new APP_UPSTREAM passed via env)  →  state: starting
 ```
 
 ### Abnormal Exit Flow
@@ -164,12 +164,12 @@ If multiple debug sessions start simultaneously, (c) is bound to the first sessi
 
 ### Child Process Cleanup
 
-When (b) kills the easyauth-emulator process, its child processes (`oauth2-proxy`) are also terminated automatically by OS mechanisms.
+When (b) stops the emulator process, the entire process tree including `oauth2-proxy` children is terminated.
 
-- **Windows:** Job Object (`KILL_ON_JOB_CLOSE`) terminates all child processes when the parent exits
-- **Linux:** `prctl(PR_SET_PDEATHSIG, SIGTERM)` sends SIGTERM to child processes when the parent exits
+- **Windows:** `taskkill /F /T /PID <PID>` force-terminates the entire process tree
+- **Linux:** `kill -TERM <PID>` sends a signal to the parent process
 
-(b) only needs to kill easyauth-emulator; individual `oauth2-proxy` processes do not need to be managed separately.
+(b) only needs to act on the emulator's parent process; individual `oauth2-proxy` processes do not need to be managed separately.
 
 ---
 
@@ -236,9 +236,9 @@ Used when the debug adapter exposes OutputEvents. Skipped if not available.
 
 #### Port Scan Specification (Priority 5)
 
-- **Scan base:** The hint port obtained from priorities 2–3. Falls back to `easyauth.portScanBase` if unavailable.
+- **Scan base:** `easyauth.portScanBase` (when `null`, scanning is skipped and priority 6 is tried immediately)
 - **Scan range:** `easyauth.portScanMax` ports (default: 5) starting from the base
-- **Method:** Diff of TCP LISTEN ports before and after the debug session starts
+- **Method:** Attempt TCP connections to consecutive ports starting from the base; ports that respond are treated as candidates
 - **False-positive mitigation:** Limiting the scan range to 5 ports reduces false positives. When multiple candidates remain, the user confirmation UI (priority 6) resolves the ambiguity.
 
 #### User Confirmation UI (Priority 6)
@@ -262,6 +262,9 @@ Used when the debug adapter exposes OutputEvents. Skipped if not available.
 | `easyauth.upstreamPort` | number \| null | `null` | Manual port override (null = auto-detect) |
 | `easyauth.portScanMax` | number | `5` | Maximum number of ports to scan |
 | `easyauth.portScanBase` | number \| null | `null` | Scan base port (when no hint is available) |
+| `easyauth.verbose` | boolean | `false` | Print all resolved config values on startup (secrets masked) |
+
+In addition to the above, many more settings exist for IDP configuration (`easyauth.entra.*`, `easyauth.google.*`, etc.), site settings (`easyauth.site.*`), TLS settings (`easyauth.tls.*`), and oauth2-proxy settings (`easyauth.oauth2proxy.*`). See the extension's Configuration Reference for details.
 
 > **Binary path:** The extension uses the binary bundled in the VSIX. No custom path configuration is needed.
 >
@@ -306,19 +309,19 @@ SecretStorage keys include the workspace folder URI. **If the project directory 
 easyauth-emulator [options]
 
 Options:
-  --upstream-port PORT   Override APP_UPSTREAM port (takes precedence over config file)
+  --app-upstream URL     Override APP_UPSTREAM (e.g. http://localhost:3000)
   --config PATH          Path to config file (default: ./config.toml)
   --verbose / -v         Print all resolved config values on startup (secrets masked)
 ```
 
-> **Implementation note:** (b) passes `APP_UPSTREAM` as an environment variable, not as `--upstream-port`. Since (c) reads environment variables with `IDP_*`, `SITE_*`, `APP_*`, and `OAUTH2_PROXY_*` prefixes with higher priority than the config file, all IDP settings, site settings, and upstream settings from (b) are passed via environment variables.
+> **(b) controls (c) via environment variables:** (b) passes `APP_UPSTREAM` and all IDP, site, and upstream settings as environment variables. Since (c) reads environment variables with `IDP_*`, `SITE_*`, `APP_*`, and `OAUTH2_PROXY_*` prefixes with higher priority than the config file, all settings from (b) are passed via environment variables. `--app-upstream` is an option for standalone use of (c) without the extension.
 
 ### Example
 
 With `APP_UPSTREAM = "http://localhost:3000"` set in config.toml:
 
 ```sh
-easyauth-emulator --upstream-port 8081
+easyauth-emulator --app-upstream http://localhost:8081
 ```
 
 → Runs with `http://localhost:8081` as `APP_UPSTREAM`.
@@ -327,19 +330,31 @@ easyauth-emulator --upstream-port 8081
 
 ## 10. VS Code Status Bar
 
-| State | Display |
-| --- | --- |
-| `stopped` | `$(shield) EasyAuth: stopped` |
-| `unconfigured` | `$(warning) EasyAuth: no config` |
-| `starting` | `$(sync~spin) EasyAuth: starting...` |
-| `running` | `$(shield) EasyAuth: 8080:8081` (emulator listen port : upstream port) |
-| `error` | `$(error) EasyAuth: error` |
-
-Clicking opens the Output Channel. Clicking in the `running` state opens the emulator in a browser.
+| State | Display | Click Behavior |
+| --- | --- | --- |
+| `stopped` | `$(shield) EasyAuth: stopped` | Detect port and start |
+| `unconfigured` | `$(warning) EasyAuth: no config` | Open extension settings |
+| `starting` | `$(sync~spin) EasyAuth: starting...` | Open Output Channel |
+| `running` | `$(shield) EasyAuth: 8080:8081` (listen port : upstream port) | Open emulator in browser |
+| `error` | `$(error) EasyAuth: error` | 1st click: open Output Channel / subsequent clicks: detect port and restart |
 
 ---
 
-## 11. Future Extensions
+## 11. Command Palette Commands
+
+| Command | Description |
+| --- | --- |
+| `EasyAuth Emulator: Start` | Detect port and start the emulator manually |
+| `EasyAuth Emulator: Stop` | Stop the emulator |
+| `EasyAuth Emulator: Restart` | Restart the emulator |
+| `EasyAuth Emulator: Open Output` | Open the Output Channel |
+| `EasyAuth Emulator: Open in Browser` | Open the emulator in a browser |
+| `EasyAuth Emulator: Set Client Secret` | Save an IDP client secret to SecretStorage |
+| `EasyAuth Emulator: Clear Client Secret` | Delete a stored client secret |
+
+---
+
+## 12. Future Extensions
 
 | Target | Extension Reuse | Approach |
 | --- | --- | --- |

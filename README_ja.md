@@ -134,14 +134,22 @@ http://<SITE_URL のホスト>:<SITE_PORT>/oauth2/callback
 ```powershell
 # Windows
 .\easyauth-emulator.exe
+
+# config.toml を編集せずに転送先を変更する場合
+.\easyauth-emulator.exe --app-upstream http://localhost:3000
 ```
 
 ```sh
 # macOS / Linux
 ./easyauth-emulator
+
+# config.toml を編集せずに転送先を変更する場合
+./easyauth-emulator --app-upstream http://localhost:3000
 ```
 
 **Ctrl+C** で全プロセスが停止します。
+
+コマンドライン オプションの全一覧は [docs/configuration-reference_ja.md](docs/configuration-reference_ja.md) を参照してください。
 
 ### 2. ブラウザでアクセスする
 

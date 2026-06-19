@@ -23,6 +23,7 @@ import platform
 import re
 import runpy
 import secrets
+import shlex
 import sys
 import tarfile
 import tempfile
@@ -341,7 +342,12 @@ def _process_idp(env: dict, idp: str, port: int,
     client_secret = _get(env, f"{pfx}_CLIENT_SECRET")
     auth_provider = _get(env, f"{pfx}_AUTH_PROVIDER", default_auth_provider)
     user_id_claim = _get(env, f"{pfx}_AUTH_USER_ID_CLAIM", default_claim)
-    scopes        = _get(env, f"{pfx}_SCOPES", "openid profile email")
+    _KIND_DEFAULT_SCOPES: dict[str, str] = {
+        "github":   "user:email read:org",
+        "facebook": "public_profile email",
+    }
+    default_scopes = _KIND_DEFAULT_SCOPES.get(idp_kind, "openid profile email")
+    scopes         = _get(env, f"{pfx}_SCOPES", default_scopes)
     prompt        = _get(env, f"{pfx}_PROMPT", "")
     # Known providers (microsoft/google/apple) use hardcoded S256; generic OIDC allows config override.
     code_challenge_method = default_pkce or _get(env, f"{pfx}_CODE_CHALLENGE_METHOD", "")
@@ -389,6 +395,10 @@ def _process_idp(env: dict, idp: str, port: int,
             args.append(f"--prompt={prompt}")
         if code_challenge_method:
             args.append(f"--code-challenge-method={code_challenge_method}")
+
+    extra_args_raw = _get(env, f"{pfx}_EXTRA_ARGS", "")
+    if extra_args_raw.strip():
+        args.extend(shlex.split(extra_args_raw))
 
     return {
         "args": args,
@@ -694,12 +704,12 @@ def _manage_oauth2_proxy(platform_str: str, pinned: str, auto_update: bool) -> N
 def main() -> None:
     # ---- Parse CLI arguments ---------------------------------------------
     parser = argparse.ArgumentParser(description="EasyAuth Emulator")
-    parser.add_argument("--upstream-port", type=int, default=None,
-                        metavar="PORT", help="Override APP_UPSTREAM port")
     parser.add_argument("--config", type=str, default=None,
-                        metavar="PATH", help="Path to config.json or config.toml")
+                        metavar="PATH", help="Path to config.toml")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Print all resolved configuration values (secrets masked)")
+    parser.add_argument("--app-upstream", type=str, default=None,
+                        metavar="URL", help="Override APP_UPSTREAM (e.g. http://localhost:3000)")
     args = parser.parse_args()
 
     # ---- Load config file ------------------------------------------------
@@ -710,17 +720,15 @@ def main() -> None:
 
     # ---- Apply environment variable overrides (e.g. from VS Code extension) --
     for key, val in os.environ.items():
-        if any(key.startswith(p) for p in ('IDP_', 'SITE_', 'APP_', 'OAUTH2_PROXY_', 'SAMPLE_APP_')):
+        if any(key.startswith(p) for p in ('IDP_', 'SITE_', 'APP_', 'OAUTH2_PROXY_', 'SAMPLE_APP_', 'TLS_')):
             env[key] = val
 
     if not config_file.exists() and not any(k.startswith('IDP_') for k in env):
         print("[start] WARNING: config file not found and no IDP environment variables set", file=sys.stderr)
 
-    # ---- Apply --upstream-port override ----------------------------------
-    if args.upstream_port is not None:
-        upstream = _get(env, "APP_UPSTREAM", f"http://localhost:{args.upstream_port}")
-        new_upstream = re.sub(r":\d+(?=/|$)", f":{args.upstream_port}", upstream)
-        env["APP_UPSTREAM"] = new_upstream
+    # ---- Apply --app-upstream override (highest priority) ----------------
+    if args.app_upstream is not None:
+        env["APP_UPSTREAM"] = args.app_upstream.rstrip("/")
 
     _ensure_cookie_secret(env, config_file)
 
@@ -775,6 +783,25 @@ def main() -> None:
         default_whitelist = f"{site_host}:{site_port}"
 
     whitelist_domain = _get(env, "OAUTH2_PROXY_WHITELIST_DOMAIN", default_whitelist)
+
+    # ---- TLS certificate validation ----------------------------------------
+    tls_cert = _get(env, "TLS_CERT_FILE", "").strip()
+    tls_key  = _get(env, "TLS_KEY_FILE",  "").strip()
+    tls_enabled = bool(tls_cert and tls_key)
+
+    if tls_enabled:
+        if not Path(tls_cert).exists():
+            _die(f"TLS_CERT_FILE not found: {tls_cert}")
+        if not Path(tls_key).exists():
+            _die(f"TLS_KEY_FILE not found: {tls_key}")
+        if not site_url.startswith("https://"):
+            print(
+                '[start] WARNING: TLS_CERT_FILE/TLS_KEY_FILE are set but SITE_URL does not use https://. '
+                'Set SITE_URL = "https://..." for correct OAuth2 redirect URLs.',
+                file=sys.stderr,
+            )
+        if not _get(env, "OAUTH2_PROXY_COOKIE_SECURE"):
+            env["OAUTH2_PROXY_COOKIE_SECURE"] = "true"
 
     # ---- Trusted proxy IPs for --reverse-proxy --------------------------------
     # Default to localhost (IPv4 + IPv6) when APP_UPSTREAM points to any loopback address.
@@ -861,7 +888,7 @@ def main() -> None:
 
     # ---- Launch app.py (pass overrides via env) ---------------------------
     child_env: dict[str, str] = {}
-    if args.upstream_port is not None:
+    if args.app_upstream is not None:
         child_env["APP_UPSTREAM"] = _get(env, "APP_UPSTREAM", "")
     app_extra_args: list[str] = []
     if args.config is not None:

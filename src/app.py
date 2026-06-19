@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import base64
 import datetime
+import html
 import http.client
 import json
 import os
 import re
+import ssl
 import sys
 import tomllib
 from http.cookies import SimpleCookie
@@ -119,15 +121,17 @@ _HOP_BY_HOP = frozenset({
     "te", "trailers", "transfer-encoding", "upgrade",
 })
 
-# Simple Icons CDN slugs (https://simpleicons.org, CC0 licensed).
+# Simple Icons CDN slugs (https://simpleicons.org, CC0 licensed), keyed by KIND.
 # Providers not listed here fall back to the generic icon.
-_IDP_SIMPLE_ICONS: dict[str, str] = {
-    "google":        "google",
-    "apple":         "apple",
-    "github":        "github",
-    "facebook":      "facebook",
+_KIND_SIMPLE_ICONS: dict[str, str] = {
+    "google":         "google",
+    "apple":          "apple",
+    "github":         "github",
+    "facebook":       "facebook",
+    "oidc":           "openid",
     "openid-connect": "openid",
 }
+_SIMPLEICONS_SLUG_RE = re.compile(r'^[a-z0-9-]+$')
 
 # IDP_SELECT_ICONS controls icon style on /.auth/login/select.
 #   simple   — Simple Icons CDN logo (default)
@@ -152,7 +156,16 @@ def _idp_icon_html(idp: str) -> str:
         return ""
     if IDP_SELECT_ICONS == "generic":
         return _IDP_ICON_GENERIC
-    slug = _IDP_SIMPLE_ICONS.get(idp)
+    icon_cfg = (_cfg(f"{_idp_cfg_prefix(idp)}_ICON") or "").strip()
+    if icon_cfg:
+        if icon_cfg.startswith(("http://", "https://")):
+            safe_url = html.escape(icon_cfg, quote=True)
+            return f'<img class="icon" src="{safe_url}" width="22" height="22" alt="">'
+        if _SIMPLEICONS_SLUG_RE.match(icon_cfg):
+            return f'<img class="icon" src="https://cdn.simpleicons.org/{icon_cfg}" width="22" height="22" alt="">'
+        return _IDP_ICON_GENERIC
+    kind = _idp_kind(idp) or _IDP_DEFAULT_KIND.get(idp, "")
+    slug = _KIND_SIMPLE_ICONS.get(kind)
     if not slug:
         return _IDP_ICON_GENERIC
     return f'<img class="icon" src="https://cdn.simpleicons.org/{slug}" width="22" height="22" alt="">'
@@ -173,7 +186,11 @@ def _parse_bool_cfg(name: str, default: str = "false") -> bool:
 
 
 DEBUG_HEADERS_ENDPOINT_ENABLED = _parse_bool_cfg("DEBUG_HEADERS_ENDPOINT_ENABLED")
-COOKIE_SECURE = _parse_bool_cfg("OAUTH2_PROXY_COOKIE_SECURE")
+TLS_CERT_FILE = (_cfg("TLS_CERT_FILE") or "").strip()
+TLS_KEY_FILE  = (_cfg("TLS_KEY_FILE")  or "").strip()
+_TLS_ENABLED  = bool(TLS_CERT_FILE and TLS_KEY_FILE)
+_DEFAULT_PROTO = "https" if _TLS_ENABLED else "http"
+COOKIE_SECURE = _parse_bool_cfg("OAUTH2_PROXY_COOKIE_SECURE") or _TLS_ENABLED
 
 
 def _parse_skip_routes(raw: str) -> "list[tuple[str, re.Pattern]]":
@@ -592,7 +609,7 @@ class _Handler(BaseHTTPRequestHandler):
             idp,
             cookie=self._header("Cookie"),
             real_ip=self._client_ip(),
-            proto=self._header("X-Forwarded-Proto") or "http",
+            proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
             host=self._header("Host"),
             uri=self.path,
         )
@@ -742,7 +759,7 @@ class _Handler(BaseHTTPRequestHandler):
                 idp,
                 cookie=self._header("Cookie"),
                 real_ip=self._client_ip(),
-                proto=self._header("X-Forwarded-Proto") or "http",
+                proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
                 host=self._header("Host"),
                 uri=self.path,
             ) or {}
@@ -804,7 +821,7 @@ class _Handler(BaseHTTPRequestHandler):
             idp,
             cookie=self._header("Cookie"),
             real_ip=self._client_ip(),
-            proto=self._header("X-Forwarded-Proto") or "http",
+            proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
             host=self._header("Host"),
             uri=self.path,
         )
@@ -813,7 +830,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         extra: dict[str, str] = {
             "X-Real-IP":               self._client_ip(),
-            "X-Forwarded-Proto":       self._header("X-Forwarded-Proto") or "http",
+            "X-Forwarded-Proto":       self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
             "X-Forwarded-Host":        self._header("Host"),
             "X-MS-CLIENT-PRINCIPAL-IDP":  _idp_auth_provider(idp),
             "X-Easyauth-User-Id-Claim":   _idp_user_id_claim(idp),
@@ -830,7 +847,17 @@ class _Handler(BaseHTTPRequestHandler):
 def main() -> None:
     port = int(SITE_PORT)
     server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)
-    print(f"[app] Listening on http://0.0.0.0:{port}")
+    if _TLS_ENABLED:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        try:
+            ctx.load_cert_chain(TLS_CERT_FILE, TLS_KEY_FILE)
+        except Exception as exc:
+            print(f"[app] ERROR: Failed to load TLS certificate: {exc}", file=sys.stderr)
+            sys.exit(1)
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        print(f"[app] Listening on https://0.0.0.0:{port}")
+    else:
+        print(f"[app] Listening on http://0.0.0.0:{port}")
     server.serve_forever()
 
 
