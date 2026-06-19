@@ -134,14 +134,22 @@ Example: `http://localhost:8080/oauth2/callback`
 ```powershell
 # Windows
 .\easyauth-emulator.exe
+
+# Override the upstream without editing config.toml
+.\easyauth-emulator.exe --app-upstream http://localhost:3000
 ```
 
 ```sh
 # macOS / Linux
 ./easyauth-emulator
+
+# Override the upstream without editing config.toml
+./easyauth-emulator --app-upstream http://localhost:3000
 ```
 
 Press **Ctrl+C** to stop all processes cleanly.
+
+For the full list of command-line options, see [docs/configuration-reference.md](docs/configuration-reference.md).
 
 ### 2. Open in a browser
 

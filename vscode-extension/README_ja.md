@@ -154,6 +154,23 @@ http://localhost:8080/oauth2/callback
 
 カスタムプロバイダーを追加した後、**EasyAuth Emulator: Set Client Secret** でクライアントシークレットを保存してください。
 
+設定できるフィールドの一覧:
+
+| フィールド | 必須 | 説明 |
+| --- | :---: | --- |
+| `name` | ✓ | `IDP_LIST` に使用する IdP 識別子（小文字英数字とハイフン） |
+| `clientId` | ✓ | OAuth2 / OIDC クライアント ID |
+| `oidcIssuerUrl` | ✓ | OIDC issuer URL（例: `https://your-provider.example.com`） |
+| `displayName` | | IdP 選択画面に表示する名前 |
+| `scopes` | | OAuth2 スコープ（スペース区切り）。既定: `openid profile email` |
+| `authUserIdClaim` | | ユーザー ID として使用する JWT claim。既定: `sub` |
+| `authProvider` | | `X-MS-CLIENT-PRINCIPAL-IDP` ヘッダーに設定する値 |
+| `prompt` | | OIDC `prompt` パラメーター（`login`、`consent` など） |
+| `codeChallengeMethod` | | PKCE コードチャレンジ方式: `S256` または `plain` |
+| `logoutEndpoint` | | IdP ログアウト URL の上書き |
+| `skipClaimsFromProfileUrl` | | `true` にすると userinfo エンドポイントからの claim 取得をスキップ |
+| `extraArgs` | | oauth2-proxy に追加で渡す起動オプション（スペース区切り、例: `"--allowed-group=my-group --oidc-extra-audience=myapp"`） |
+
 ---
 
 ## 設定リファレンス

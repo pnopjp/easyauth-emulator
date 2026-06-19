@@ -2,6 +2,14 @@
 
 This document describes runtime configuration, compatibility boundaries, and troubleshooting information.
 
+## Command-line Options
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--app-upstream URL` | — | Override `APP_UPSTREAM`. Takes priority over `config.toml` and environment variables. Useful for changing the target port without editing the config file. |
+| `--config PATH` | `config.toml` in current directory | Path to the configuration file. |
+| `--verbose`, `-v` | `false` | Print all resolved configuration values on startup with secrets masked. Equivalent to `VERBOSE = true` in `config.toml`. |
+
 ## Configuration
 
 Security note:
@@ -33,7 +41,7 @@ Default selection behavior:
 
 ### Per-IDP
 
-Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`.
+Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`, where `<NAME>` is the IDP identifier from `IDP_LIST` converted to uppercase (e.g. `myoidc` in `IDP_LIST` → `IDP_MYOIDC_*` keys).
 
 | Parameter | Required | Default | Description |
 | --- | :---: | --- | --- |
@@ -49,6 +57,7 @@ Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`.
 | `IDP_<NAME>_CODE_CHALLENGE_METHOD` | | `microsoft`/`google`/`apple`: `S256`, others: — | PKCE code challenge method (`S256` or `plain`). `microsoft`, `google`, and `apple` always use `S256` regardless of this setting. For `oidc` KIND, set to `S256` when the IdP supports it. No effect for non-OIDC providers. |
 | `IDP_<NAME>_LOGOUT_ENDPOINT` | | Derived from KIND | IdP logout URL. For `microsoft` KIND, auto-derived from the OIDC issuer URL. |
 | `IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL` | | `microsoft`: `true`, others: `false` | Whether oauth2-proxy skips fetching claims from the OIDC userinfo URL. Set to `true` to prevent userinfo from overwriting ID token claims. |
+| `IDP_<NAME>_EXTRA_ARGS` | | — | Space-separated extra options passed to oauth2-proxy for this IDP. Example: `"--allowed-group=my-group --oidc-extra-audience=myapp"`. |
 
 ※1 Required only for `microsoft`, `google`, `apple`, and `oidc` KIND.
 

@@ -175,6 +175,13 @@
             "scope": "resource",
             "order": 6,
             "markdownDescription": "`IDP_ENTRA_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `preferred_username`."
+          },
+          "easyauth.entra.extraArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`IDP_ENTRA_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line. Example: `--allowed-group=my-group --oidc-extra-audience=myapp`."
           }
         }
       },
@@ -209,6 +216,13 @@
             "scope": "resource",
             "order": 5,
             "markdownDescription": "`IDP_GOOGLE_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `email`."
+          },
+          "easyauth.google.extraArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 6,
+            "markdownDescription": "`IDP_GOOGLE_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
           }
         }
       },
@@ -243,6 +257,13 @@
             "scope": "resource",
             "order": 5,
             "markdownDescription": "`IDP_FACEBOOK_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `id`."
+          },
+          "easyauth.facebook.extraArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 6,
+            "markdownDescription": "`IDP_FACEBOOK_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
           }
         }
       },
@@ -277,6 +298,13 @@
             "scope": "resource",
             "order": 5,
             "markdownDescription": "`IDP_APPLE_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `email`."
+          },
+          "easyauth.apple.extraArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 6,
+            "markdownDescription": "`IDP_APPLE_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
           }
         }
       },
@@ -311,6 +339,13 @@
             "scope": "resource",
             "order": 5,
             "markdownDescription": "`IDP_GITHUB_AUTH_USER_ID_CLAIM`: JWT claim used as user ID. Default: `login`."
+          },
+          "easyauth.github.extraArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 6,
+            "markdownDescription": "`IDP_GITHUB_EXTRA_ARGS`: Space-separated extra flags appended verbatim to the oauth2-proxy command line."
           }
         }
       },
@@ -376,6 +411,10 @@
                 "skipClaimsFromProfileUrl": {
                   "type": "boolean",
                   "description": "IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL: Skip fetching additional claims from the userinfo endpoint."
+                },
+                "extraArgs": {
+                  "type": "string",
+                  "description": "IDP_<NAME>_EXTRA_ARGS: Space-separated extra flags appended verbatim to the oauth2-proxy command line (e.g. '--allowed-group=my-group --oidc-extra-audience=myapp')."
                 }
               },
               "additionalProperties": false

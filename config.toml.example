@@ -98,7 +98,8 @@ OAUTH2_PROXY_COOKIE_SECURE = false
 #   github
 #   oidc       — Generic OpenID Connect  (alias: openid-connect)
 
-# Per-IDP variable template — replace <NAME> with an ID from IDP_LIST.
+# Per-IDP variable template — replace <NAME> with the IDP ID from IDP_LIST, converted to uppercase.
+# Example: IDP_LIST = ["myoidc"] → use IDP_MYOIDC_* keys.
 # IDP_<NAME>_DISPLAY_NAME = ""
 # IDP_<NAME>_KIND = ""               # microsoft | apple | facebook | github | google | oidc
 # IDP_<NAME>_OIDC_ISSUER_URL = ""    # required for microsoft, apple, google, oidc
@@ -112,6 +113,8 @@ OAUTH2_PROXY_COOKIE_SECURE = false
 # IDP_<NAME>_CODE_CHALLENGE_METHOD = ""  # optional (oidc kind only): S256 | plain
 #                                        # microsoft/google/apple use S256 automatically
 # IDP_<NAME>_LOGOUT_ENDPOINT = ""    # optional; for microsoft, derived from OIDC_ISSUER_URL when omitted
+# IDP_<NAME>_EXTRA_ARGS = ""         # optional; space-separated extra options passed to oauth2-proxy
+#                                    # Example: "--allowed-group=my-group --oidc-extra-audience=myapp"
 
 # --- Entra ID (enabled by IDP_LIST = "entra") --------------------------------
 IDP_ENTRA_DISPLAY_NAME = "Microsoft Entra ID"
@@ -126,7 +129,7 @@ IDP_ENTRA_SCOPES = "openid profile email"
 # IDP_ENTRA_PROMPT = "login"
 # IDP_ENTRA_LOGOUT_ENDPOINT = ""
 
-# --- Google ------------------------------------------------------------------
+# --- Google (enabled by IDP_LIST = "google") ---------------------------------
 # IDP_GOOGLE_DISPLAY_NAME = "Google"
 # IDP_GOOGLE_KIND = "google"
 # IDP_GOOGLE_OIDC_ISSUER_URL = "https://accounts.google.com"
@@ -137,7 +140,7 @@ IDP_ENTRA_SCOPES = "openid profile email"
 # IDP_GOOGLE_SCOPES = "openid profile email"
 # IDP_GOOGLE_PROMPT = "select_account"
 
-# --- Apple -------------------------------------------------------------------
+# --- Apple (enabled by IDP_LIST = "apple") -----------------------------------
 # IDP_APPLE_DISPLAY_NAME = "Apple"
 # IDP_APPLE_KIND = "apple"
 # IDP_APPLE_OIDC_ISSUER_URL = "https://appleid.apple.com"
@@ -145,26 +148,28 @@ IDP_ENTRA_SCOPES = "openid profile email"
 # IDP_APPLE_CLIENT_SECRET = ""
 # IDP_APPLE_SCOPES = "openid email name"
 
-# --- Facebook ----------------------------------------------------------------
+# --- Facebook (enabled by IDP_LIST = "facebook") -----------------------------
 # IDP_FACEBOOK_DISPLAY_NAME = "Facebook"
 # IDP_FACEBOOK_KIND = "facebook"
 # IDP_FACEBOOK_CLIENT_ID = ""
 # IDP_FACEBOOK_CLIENT_SECRET = ""
 
-# --- GitHub ------------------------------------------------------------------
+# --- GitHub (enabled by IDP_LIST = "github") ---------------------------------
 # IDP_GITHUB_DISPLAY_NAME = "GitHub"
 # IDP_GITHUB_KIND = "github"
 # IDP_GITHUB_CLIENT_ID = ""
 # IDP_GITHUB_CLIENT_SECRET = ""
 # IDP_GITHUB_SCOPES = "read:user user:email"
 
-# --- Generic OIDC ------------------------------------------------------------
-# IDP_OPENID_CONNECT_DISPLAY_NAME = "OpenID Connect"
-# IDP_OPENID_CONNECT_KIND = "oidc"
-# IDP_OPENID_CONNECT_OIDC_ISSUER_URL = ""
-# IDP_OPENID_CONNECT_CLIENT_ID = ""
-# IDP_OPENID_CONNECT_CLIENT_SECRET = ""
-# IDP_OPENID_CONNECT_SCOPES = "openid profile email"
+# --- Generic OIDC (example when IDP_LIST = ["myoidc"]) ----------------------
+# IDP_MYOIDC_DISPLAY_NAME = "OpenID Connect"
+# IDP_MYOIDC_KIND = "oidc"
+# IDP_MYOIDC_OIDC_ISSUER_URL = ""
+# IDP_MYOIDC_AUTH_PROVIDER = ""
+# IDP_MYOIDC_CLIENT_ID = ""
+# IDP_MYOIDC_CLIENT_SECRET = ""
+# IDP_MYOIDC_SCOPES = "openid profile email"
+# IDP_MYOIDC_CODE_CHALLENGE_METHOD = ""
 
 # ---- sample_app settings (optional verification app) -----------------------
 

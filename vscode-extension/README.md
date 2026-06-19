@@ -18,7 +18,6 @@ EasyAuth Emulator bridges that gap by running a compatible authentication gatewa
 
 ![How it works](https://raw.githubusercontent.com/pnopjp/easyauth-emulator/main/vscode-extension/images/flow.png)
 
-
 The extension auto-detects your app's listening port from `launch.json`, framework config files (`.env`, `launchSettings.json`, `application.properties`, …), or debug output — so no manual wiring is needed in most projects.
 
 ---
@@ -142,6 +141,23 @@ Add any OIDC-compatible provider via `easyauth.customIdps`:
 ```
 
 After adding a custom provider, store its client secret with **EasyAuth Emulator: Set Client Secret**.
+
+Available fields per entry:
+
+| Field | Required | Description |
+| --- | :---: | --- |
+| `name` | ✓ | IDP identifier used in `IDP_LIST` (lowercase alphanumeric and hyphens) |
+| `clientId` | ✓ | OAuth2 / OIDC client ID |
+| `oidcIssuerUrl` | ✓ | OIDC issuer URL (e.g. `https://your-provider.example.com`) |
+| `displayName` | | Label shown on the IdP selection screen |
+| `scopes` | | Space-separated OAuth2 scopes. Default: `openid profile email` |
+| `authUserIdClaim` | | JWT claim used as user ID. Default: `sub` |
+| `authProvider` | | Value set in `X-MS-CLIENT-PRINCIPAL-IDP` header |
+| `prompt` | | OIDC `prompt` parameter (`login`, `consent`, etc.) |
+| `codeChallengeMethod` | | PKCE code challenge method: `S256` or `plain` |
+| `logoutEndpoint` | | Override the IdP logout URL |
+| `skipClaimsFromProfileUrl` | | `true` to skip fetching claims from the userinfo endpoint |
+| `extraArgs` | | Space-separated extra options passed to oauth2-proxy (e.g. `"--allowed-group=my-group --oidc-extra-audience=myapp"`) |
 
 ---
 

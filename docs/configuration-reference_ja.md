@@ -2,6 +2,14 @@
 
 このドキュメントでは、ランタイム設定、互換性の境界、トラブルシューティング情報をまとめます。
 
+## コマンドライン オプション
+
+| オプション | 既定値 | 説明 |
+| --- | --- | --- |
+| `--app-upstream URL` | — | `APP_UPSTREAM` を上書きする。`config.toml` および環境変数より優先。設定ファイルを編集せずに転送先ポートを変更したい場合に便利。 |
+| `--config PATH` | カレントディレクトリの `config.toml` | 設定ファイルのパス。 |
+| `--verbose`, `-v` | `false` | 起動時に全設定値を出力する（シークレットはマスク）。`config.toml` の `VERBOSE = true` と同等。 |
+
 ## 設定パラメーター
 
 セキュリティ注意:
@@ -20,7 +28,7 @@
 | `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | `GET /.debug/headers` 診断エンドポイントを有効化するか。有効時はその URL でエミュレーターが受け取り計算したヘッダーを確認できる。既定では無効（`404` を返す）。 |
 | `SKIP_AUTH_ROUTES` | | — | 認証をスキップしてアップストリームへ直接転送するルート。形式: リクエストパスにマッチする `[METHOD=]REGEX` パターンをカンマ区切りで列挙。例: `GET=^/health$,^/public/`。転送前に認証ヘッダーは除去される。 |
 | `IDP_SELECT_ICONS` | | `simple` | `/.auth/login/select` 画面のアイコンスタイル。`simple` — Simple Icons CDN のロゴ。`generic` — 汎用 ID カードアイコン（完全オフライン対応）。`text` — アイコンなし、テキストのみ。 |
-| `VERBOSE` | | `false` | 起動時にシークレットをマスクした全設定値を出力するか。`--verbose` / `-v` CLI フラグと同等。 |
+| `VERBOSE` | | `false` | 起動時に全設定値を出力するか（シークレットはマスク）。`--verbose` / `-v` CLI フラグと同等。 |
 
 ※ `SAMPLE_APP_PORT` を変更している場合、`APP_UPSTREAM` 未設定時の規定値は `http://localhost:<SAMPLE_APP_PORT>` になります。
 
@@ -33,7 +41,7 @@
 
 ### IdP 個別設定
 
-`IDP_LIST` に含めた各 IdP に対して、`IDP_<NAME>_*` を設定します。
+`IDP_LIST` に含めた各 IdP に対して `IDP_<NAME>_*` を設定します。`<NAME>` は `IDP_LIST` に記載した IdP 名を大文字にしたものです（例: `IDP_LIST` に `myoidc` と書いた場合、キー名は `IDP_MYOIDC_*` になります）。
 
 | パラメーター | 必須 | 既定値 | 説明 |
 | --- | :---: | --- | --- |
@@ -49,6 +57,7 @@
 | `IDP_<NAME>_CODE_CHALLENGE_METHOD` | | `microsoft`/`google`/`apple`: `S256`、その他: — | PKCE のコードチャレンジ方式（`S256` または `plain`）。`microsoft`・`google`・`apple` はこの設定に関わらず常に `S256` を使用。`oidc` KIND で IdP が PKCE に対応している場合は `S256` を設定。OIDC 以外には無効。 |
 | `IDP_<NAME>_LOGOUT_ENDPOINT` | | KIND から導出 | IdP ログアウト URL。`microsoft` KIND は OIDC issuer URL から自動導出。 |
 | `IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL` | | `microsoft`: `true`、その他: `false` | OIDC userinfo からの claim 取得をスキップするか。`true` にすると userinfo レスポンスが ID token の claim を上書きしない。 |
+| `IDP_<NAME>_EXTRA_ARGS` | | — | この IDP の oauth2-proxy に追加で渡す起動オプション（スペース区切り）。例: `"--allowed-group=my-group --oidc-extra-audience=myapp"`。 |
 
 ※1 `microsoft`・`google`・`apple`・`oidc` KIND の場合のみ必須。
 

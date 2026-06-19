@@ -23,6 +23,7 @@ import platform
 import re
 import runpy
 import secrets
+import shlex
 import sys
 import tarfile
 import tempfile
@@ -390,6 +391,10 @@ def _process_idp(env: dict, idp: str, port: int,
         if code_challenge_method:
             args.append(f"--code-challenge-method={code_challenge_method}")
 
+    extra_args_raw = _get(env, f"{pfx}_EXTRA_ARGS", "")
+    if extra_args_raw.strip():
+        args.extend(shlex.split(extra_args_raw))
+
     return {
         "args": args,
         "port": port,
@@ -694,12 +699,12 @@ def _manage_oauth2_proxy(platform_str: str, pinned: str, auto_update: bool) -> N
 def main() -> None:
     # ---- Parse CLI arguments ---------------------------------------------
     parser = argparse.ArgumentParser(description="EasyAuth Emulator")
-    parser.add_argument("--upstream-port", type=int, default=None,
-                        metavar="PORT", help="Override APP_UPSTREAM port")
     parser.add_argument("--config", type=str, default=None,
-                        metavar="PATH", help="Path to config.json or config.toml")
+                        metavar="PATH", help="Path to config.toml")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Print all resolved configuration values (secrets masked)")
+    parser.add_argument("--app-upstream", type=str, default=None,
+                        metavar="URL", help="Override APP_UPSTREAM (e.g. http://localhost:3000)")
     args = parser.parse_args()
 
     # ---- Load config file ------------------------------------------------
@@ -716,11 +721,9 @@ def main() -> None:
     if not config_file.exists() and not any(k.startswith('IDP_') for k in env):
         print("[start] WARNING: config file not found and no IDP environment variables set", file=sys.stderr)
 
-    # ---- Apply --upstream-port override ----------------------------------
-    if args.upstream_port is not None:
-        upstream = _get(env, "APP_UPSTREAM", f"http://localhost:{args.upstream_port}")
-        new_upstream = re.sub(r":\d+(?=/|$)", f":{args.upstream_port}", upstream)
-        env["APP_UPSTREAM"] = new_upstream
+    # ---- Apply --app-upstream override (highest priority) ----------------
+    if args.app_upstream is not None:
+        env["APP_UPSTREAM"] = args.app_upstream.rstrip("/")
 
     _ensure_cookie_secret(env, config_file)
 
@@ -861,7 +864,7 @@ def main() -> None:
 
     # ---- Launch app.py (pass overrides via env) ---------------------------
     child_env: dict[str, str] = {}
-    if args.upstream_port is not None:
+    if args.app_upstream is not None:
         child_env["APP_UPSTREAM"] = _get(env, "APP_UPSTREAM", "")
     app_extra_args: list[str] = []
     if args.config is not None:
