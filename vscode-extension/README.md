@@ -76,7 +76,7 @@ If you changed `easyauth.site.port`, use that port instead.
 
 Press **F5** to start debugging. The emulator starts automatically after your app.
 
-Once running, navigate to `http://localhost:8080/` in your browser. If you changed `easyauth.site.port`, use that port number instead. Use **EasyAuth Emulator: Open in Browser** from the Command Palette to open it directly.
+Once running, click the `EasyAuth: <port>:<upstream>` status bar item to open the gateway in your browser. To navigate manually, use `http://localhost:8080/` (or the port set in `easyauth.site.port`).
 
 ---
 

@@ -78,7 +78,7 @@ http://localhost:8080/oauth2/callback
 
 **F5** を押してデバッグを開始すると、アプリ起動後にエミュレーターが自動起動します。
 
-起動後はブラウザで `http://localhost:8080/` に直接アクセスしてください。`easyauth.site.port` を変更した場合はそのポート番号を使用してください。コマンドパレットから **EasyAuth Emulator: Open in Browser** を実行してブラウザで直接開くこともできます。
+起動後はステータスバーの `EasyAuth: <port>:<upstream>` をクリックするとブラウザでゲートウェイが開きます。URL を直接入力する場合は `http://localhost:8080/`（または `easyauth.site.port` で設定したポート）を使用してください。
 
 ---
 
