@@ -20,7 +20,7 @@
 
 .EXAMPLE
     .\sign-client-secret-jwt.ps1 -TeamId "XXXXXXXXXX" -ClientId "com.example.app" `
-        -P8File ".cert\AuthKey_7XB436U268.p8" -JwtFile "client_secret.jwt"
+        -P8File ".cert\AuthKey_ABCD123456.p8" -JwtFile "client_secret.jwt"
 #>
 [CmdletBinding()]
 param(
