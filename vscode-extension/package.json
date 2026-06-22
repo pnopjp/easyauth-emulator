@@ -159,7 +159,7 @@
       },
       {
         "id": "easyauth-entra",
-        "title": "Microsoft Entra",
+        "title": "Microsoft Entra ID",
         "properties": {
           "easyauth.entra.displayName": {
             "type": "string",
@@ -173,7 +173,7 @@
             "default": "",
             "scope": "resource",
             "order": 2,
-            "markdownDescription": "**Required.** `IDP_ENTRA_CLIENT_ID`: Application (client) ID registered with Microsoft Entra."
+            "markdownDescription": "**Required.** `IDP_ENTRA_CLIENT_ID`: Application (client) ID registered with Microsoft Entra ID."
           },
           "easyauth.entra.oidcIssuerUrl": {
             "type": "string",
@@ -605,73 +605,100 @@
       "view/item/context": [
         {
           "command": "easyauth.openSettings",
-          "when": "view == easyauth.statusView",
+          "when": "view == easyauth.statusView && viewItem != easyauth.idp",
           "group": "inline"
         },
         {
           "command": "easyauth.setSecret",
-          "when": "view == easyauth.statusView",
+          "when": "view == easyauth.statusView && viewItem != easyauth.idp",
           "group": "inline"
         },
         {
           "command": "easyauth.openOutput",
           "when": "view == easyauth.statusView && (viewItem == easyauth.running || viewItem == easyauth.starting || viewItem == easyauth.error)"
+        },
+        {
+          "command": "easyauth.idp.openInBrowser",
+          "when": "view == easyauth.statusView && viewItem == easyauth.idp",
+          "group": "inline@1"
+        },
+        {
+          "command": "easyauth.idp.openInPrivateBrowser",
+          "when": "view == easyauth.statusView && viewItem == easyauth.idp && easyauth.privateBrowserConfigured",
+          "group": "inline@2"
         }
       ]
     },
     "commands": [
       {
         "command": "easyauth.openSettings",
-        "title": "EasyAuth Emulator: Open Settings",
+        "category": "EasyAuth Emulator",
+        "title": "Open Settings",
         "shortTitle": "Settings",
         "icon": "$(gear)"
       },
       {
         "command": "easyauth.start",
-        "title": "EasyAuth Emulator: Start",
-        "shortTitle": "Start",
+        "category": "EasyAuth Emulator",
+        "title": "Start",
         "icon": "$(play)"
       },
       {
         "command": "easyauth.stop",
-        "title": "EasyAuth Emulator: Stop",
-        "shortTitle": "Stop",
+        "category": "EasyAuth Emulator",
+        "title": "Stop",
         "icon": "$(stop-circle)"
       },
       {
         "command": "easyauth.restart",
-        "title": "EasyAuth Emulator: Restart",
-        "shortTitle": "Restart",
+        "category": "EasyAuth Emulator",
+        "title": "Restart",
         "icon": "$(refresh)"
       },
       {
         "command": "easyauth.openOutput",
-        "title": "EasyAuth Emulator: Open Output",
+        "category": "EasyAuth Emulator",
+        "title": "Open Output",
         "shortTitle": "Show Output",
         "icon": "$(output)"
       },
       {
         "command": "easyauth.openInBrowser",
-        "title": "EasyAuth Emulator: Open in Browser",
-        "shortTitle": "Open in Browser",
+        "category": "EasyAuth Emulator",
+        "title": "Open in Browser",
         "icon": "$(globe)"
       },
       {
         "command": "easyauth.openInPrivateBrowser",
-        "title": "EasyAuth Emulator: Open in Private Browser",
-        "shortTitle": "Open in Private Browser",
+        "category": "EasyAuth Emulator",
+        "title": "Open in Private Browser",
         "icon": "$(eye-closed)"
       },
       {
         "command": "easyauth.setSecret",
-        "title": "EasyAuth Emulator: Set Client Secret",
+        "category": "EasyAuth Emulator",
+        "title": "Set Client Secret",
         "shortTitle": "Set Client Secret",
         "icon": "$(key)"
       },
       {
         "command": "easyauth.clearSecret",
-        "title": "EasyAuth Emulator: Clear Client Secret",
-        "shortTitle": "Clear Client Secret"
+        "category": "EasyAuth Emulator",
+        "title": "Clear Client Secret"
+      },
+      {
+        "command": "easyauth.idp.openInBrowser",
+        "category": "EasyAuth Emulator",
+        "title": "Open IDP Login in Browser",
+        "shortTitle": "Open in Browser",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "easyauth.idp.openInPrivateBrowser",
+        "category": "EasyAuth Emulator",
+        "title": "Open IDP Login in Private Browser",
+        "shortTitle": "Open in Private Browser",
+        "icon": "$(eye-closed)"
       }
     ]
   },

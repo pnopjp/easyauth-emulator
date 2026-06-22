@@ -258,7 +258,7 @@ A Client ID is configured but no client secret has been stored yet. Click the st
 
 ### Status bar shows `$(warning) EasyAuth: Entra issuer missing`
 
-Microsoft Entra's client ID and secret are configured, but the OIDC Issuer URL is not set. Click the status bar item to open the `easyauth.entra.oidcIssuerUrl` field in workspace settings. Enter a tenant-specific issuer URL, for example: `https://login.microsoftonline.com/<tenant-id>/v2.0`.
+Microsoft Entra ID's client ID and secret are configured, but the OIDC Issuer URL is not set. Click the status bar item to open the `easyauth.entra.oidcIssuerUrl` field in workspace settings. Enter a tenant-specific issuer URL, for example: `https://login.microsoftonline.com/<tenant-id>/v2.0`.
 
 ### Emulator starts but one of my IdPs is not working
 

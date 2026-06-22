@@ -33,7 +33,7 @@ export class StatusBarManager implements vscode.Disposable {
                 break;
             case 'missing_entra_issuer':
                 this.item.text = '$(warning) EasyAuth: Entra issuer missing';
-                this.item.tooltip = 'EasyAuth Emulator: Microsoft Entra OIDC Issuer URL is not set. Click to open Entra settings.';
+                this.item.tooltip = 'EasyAuth Emulator: Microsoft Entra ID OIDC Issuer URL is not set. Click to open Entra settings.';
                 this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
                 break;
             case 'starting':

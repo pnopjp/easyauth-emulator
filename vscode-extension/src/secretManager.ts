@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 const BUILTIN_IDPS = [
-    { key: 'entra',    label: 'Microsoft Entra' },
+    { key: 'entra',    label: 'Microsoft Entra ID' },
     { key: 'google',   label: 'Google' },
     { key: 'facebook', label: 'Facebook' },
     { key: 'apple',    label: 'Apple' },
