@@ -40,10 +40,10 @@ graph LR
 
 - `GET /.auth/me`
 - `GET /.auth/login`
-- `GET /.auth/login/select` _（エミュレーター独自実装 — Azure Easy Auth には存在しない）_
 - `GET /.auth/login/<idp>`
-- `GET /.auth/login/aad`
+  - 例\) `GET /.auth/login/aad`
 - `GET /.auth/logout`
+- `GET /.auth/login/select` _（エミュレーター独自実装 — Azure Easy Auth には存在しない）_
 
 上記以外の `/.auth/*` エンドポイントは 404 を返します。
 
@@ -65,21 +65,21 @@ graph LR
 ## ディレクトリ構成
 
 ```text
-start.py               # 起動スクリプト
-README.md              # 英語版ドキュメント
-README_ja.md           # このファイル
-config.toml            # 設定ファイル（config.toml.example からコピー）
+start.py               # 起動スクリプト（ソース実行時のみ）
 config.toml.example    # 設定テンプレート
+config.toml            # 設定ファイル（config.toml.example からコピー）
 src/
   app.py               # HTTP ゲートウェイ兼認証アプリ
   sample_app.py        # 動作確認用アプリ
 bin/
   oauth2-proxy/
     oauth2-proxy[.exe] # oauth2-proxy バイナリ（初回起動時に自動ダウンロード）
+scripts/
+  package.py           # 非対応プラットフォーム向けビルドスクリプト
 vscode-extension/      # VS Code 拡張機能（TypeScript）
 docs/
-  runtime-guide.md     # 環境変数リファレンス（英語）
-  configuration-reference_ja.md  # 環境変数リファレンス（日本語）
+  configuration-reference.md     # 設定リファレンス（英語）
+  configuration-reference_ja.md  # 設定リファレンス（日本語）
 ```
 
 ## セットアップ

@@ -25,6 +25,7 @@ export class EmulatorManager implements vscode.Disposable {
         private readonly secretManager: SecretManager,
     ) {
         this.setState(this.hasConfig() ? 'stopped' : 'unconfigured');
+        void this.updateStateForSecrets();
     }
 
     isManaging(): boolean {
@@ -44,7 +45,7 @@ export class EmulatorManager implements vscode.Disposable {
     }
 
     async start(port: number, sessionId: string): Promise<void> {
-        if (this.state !== 'stopped') {
+        if (this.state !== 'stopped' && this.state !== 'missing_secret' && this.state !== 'missing_entra_issuer') {
             if (this.currentPort !== port) {
                 // Port changed — restart with new port
                 await this.stop();
@@ -133,6 +134,9 @@ export class EmulatorManager implements vscode.Disposable {
                 this.process = null;
                 this.sessionId = null;
                 this.currentPort = null;
+                if (this.state === 'stopped') {
+                    void this.updateStateForSecrets();
+                }
             });
 
             proc.on('error', (err) => {
@@ -270,11 +274,48 @@ export class EmulatorManager implements vscode.Disposable {
     }
 
     onConfigurationChanged(): void {
-        if (this.state === 'unconfigured' && this.hasConfig()) {
-            this.setState('stopped');
-        } else if (this.state === 'stopped' && !this.hasConfig()) {
-            this.setState('unconfigured');
+        if (this.state === 'starting' || this.state === 'running' || this.state === 'error') {
+            return;
         }
+        if (!this.hasConfig()) {
+            this.setState('unconfigured');
+            return;
+        }
+        void this.updateStateForSecrets();
+    }
+
+    async updateStateForSecrets(): Promise<void> {
+        if (this.isActiveState()) {
+            return;
+        }
+        if (!this.hasConfig()) {
+            this.setState('unconfigured');
+            return;
+        }
+        const hasUnset = await this.secretManager.hasUnsetSecrets();
+        // Re-check after async: state may have changed while awaiting (e.g. emulator restarted)
+        if (this.isActiveState()) {
+            return;
+        }
+        if (hasUnset) {
+            this.setState('missing_secret');
+            return;
+        }
+        if (this.hasEntraMissingIssuerUrl()) {
+            this.setState('missing_entra_issuer');
+            return;
+        }
+        this.setState('stopped');
+    }
+
+    private isActiveState(): boolean {
+        return this.state === 'starting' || this.state === 'running' || this.state === 'error';
+    }
+
+    private hasEntraMissingIssuerUrl(): boolean {
+        const config = vscode.workspace.getConfiguration('easyauth');
+        if (!config.get<string>('entra.clientId', '').trim()) return false;
+        return !config.get<string>('entra.oidcIssuerUrl', '').trim();
     }
 
     private async buildEnv(port: number): Promise<NodeJS.ProcessEnv> {

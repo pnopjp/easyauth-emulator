@@ -58,7 +58,7 @@
 | `IDP_<NAME>_CODE_CHALLENGE_METHOD` | | `microsoft`/`google`/`apple`: `S256`、その他: — | PKCE のコードチャレンジ方式（`S256` または `plain`）。`microsoft`・`google`・`apple` はこの設定に関わらず常に `S256` を使用。`oidc` KIND で IdP が PKCE に対応している場合は `S256` を設定。OIDC 以外には無効。 |
 | `IDP_<NAME>_LOGOUT_ENDPOINT` | | KIND から導出 | IdP ログアウト URL。`microsoft` KIND は OIDC issuer URL から自動導出。 |
 | `IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL` | | `microsoft`: `true`、その他: `false` | OIDC userinfo からの claim 取得をスキップするか。`true` にすると userinfo レスポンスが ID token の claim を上書きしない。 |
-| `IDP_<NAME>_EXTRA_ARGS` | | — | この IDP の oauth2-proxy に追加で渡す起動オプション（スペース区切り）。例: `"--allowed-group=my-group --oidc-extra-audience=myapp"`。 |
+| `IDP_<NAME>_EXTRA_ARGS` | | — | この IDP の oauth2-proxy に追加で渡す起動オプション（スペース区切り）。例: `"--allowed-group=my-group --oidc-extra-audience=myapp"`。指定可能なオプションは [oauth2-proxy 設定リファレンス](https://oauth2-proxy.github.io/oauth2-proxy/configuration/overview) を参照。 |
 
 ※1 `microsoft`・`google`・`apple`・`oidc` KIND の場合のみ必須。
 
@@ -66,7 +66,7 @@
 
 | KIND | 既定値 |
 | --- | --- |
-| `microsoft` | `https://login.microsoftonline.com/common/v2.0`（Entra ID ではテナント固有 URL を推奨） |
+| `microsoft` | — （必須） |
 | `google` | `https://accounts.google.com` |
 | `apple` | `https://appleid.apple.com` |
 | `oidc` | — （必須） |

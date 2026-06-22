@@ -58,7 +58,7 @@ Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`, where `<NAME>` is 
 | `IDP_<NAME>_CODE_CHALLENGE_METHOD` | | `microsoft`/`google`/`apple`: `S256`, others: — | PKCE code challenge method (`S256` or `plain`). `microsoft`, `google`, and `apple` always use `S256` regardless of this setting. For `oidc` KIND, set to `S256` when the IdP supports it. No effect for non-OIDC providers. |
 | `IDP_<NAME>_LOGOUT_ENDPOINT` | | Derived from KIND | IdP logout URL. For `microsoft` KIND, auto-derived from the OIDC issuer URL. |
 | `IDP_<NAME>_SKIP_CLAIMS_FROM_PROFILE_URL` | | `microsoft`: `true`, others: `false` | Whether oauth2-proxy skips fetching claims from the OIDC userinfo URL. Set to `true` to prevent userinfo from overwriting ID token claims. |
-| `IDP_<NAME>_EXTRA_ARGS` | | — | Space-separated extra options passed to oauth2-proxy for this IDP. Example: `"--allowed-group=my-group --oidc-extra-audience=myapp"`. |
+| `IDP_<NAME>_EXTRA_ARGS` | | — | Space-separated extra options passed to oauth2-proxy for this IDP. Example: `"--allowed-group=my-group --oidc-extra-audience=myapp"`. See the [oauth2-proxy configuration reference](https://oauth2-proxy.github.io/oauth2-proxy/configuration/overview) for available options. |
 
 ※1 Required only for `microsoft`, `google`, `apple`, and `oidc` KIND.
 
@@ -66,7 +66,7 @@ Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`, where `<NAME>` is 
 
 | KIND | Default |
 | --- | --- |
-| `microsoft` | `https://login.microsoftonline.com/common/v2.0` (use a tenant-specific URL for Entra ID) |
+| `microsoft` | — (required) |
 | `google` | `https://accounts.google.com` |
 | `apple` | `https://appleid.apple.com` |
 | `oidc` | — (required) |

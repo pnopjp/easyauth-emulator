@@ -4,7 +4,53 @@ import { EmulatorManager } from './emulatorManager';
 import { PortDetector } from './portDetector';
 import { StatusBarManager } from './statusBar';
 import { SecretManager } from './secretManager';
-import { EmulatorTreeProvider } from './emulatorTreeProvider';
+import { EmulatorTreeProvider, IdpInfo, IdpTreeItem } from './emulatorTreeProvider';
+
+const BUILTIN_IDP_LABELS: Record<string, string> = {
+    entra: 'Microsoft Entra ID',
+    google: 'Google',
+    facebook: 'Facebook',
+    apple: 'Apple',
+    github: 'GitHub',
+};
+
+// Default Simple Icons slugs for built-in IDPs (used when no custom icon is configured).
+const BUILTIN_DEFAULT_ICONS: Record<string, string> = {
+    entra: 'microsoft',
+    google: 'google',
+    facebook: 'facebook',
+    apple: 'apple',
+    github: 'github',
+};
+
+// IDP keys are used verbatim in URLs — only letters, digits, hyphens, underscores.
+const SAFE_IDP_KEY = /^[A-Za-z0-9_-]+$/;
+
+function getConfiguredIdps(): IdpInfo[] {
+    const config = vscode.workspace.getConfiguration('easyauth');
+    const idps: IdpInfo[] = [];
+    for (const [key, label] of Object.entries(BUILTIN_IDP_LABELS)) {
+        if (config.get<string>(`${key}.clientId`, '').trim()) {
+            const configIcon = config.get<string>(`${key}.icon`, '').trim();
+            const icon = configIcon || BUILTIN_DEFAULT_ICONS[key];
+            idps.push({ key, displayName: label, icon });
+        }
+    }
+    interface CustomIdp { name?: string; clientId?: string; displayName?: string; icon?: string; }
+    const customIdps = config.get<CustomIdp[]>('customIdps', []);
+    for (const idp of customIdps) {
+        const name = idp.name?.trim();
+        if (name && idp.clientId?.trim() && SAFE_IDP_KEY.test(name)) {
+            const icon = idp.icon?.trim() || undefined;
+            idps.push({ key: name, displayName: idp.displayName?.trim() || name, icon });
+        }
+    }
+    return idps;
+}
+
+function getIconsMode(): string {
+    return vscode.workspace.getConfiguration('easyauth').get<string>('idpSelectIcons', 'simple');
+}
 
 export function activate(context: vscode.ExtensionContext): void {
     const outputChannel = vscode.window.createOutputChannel('EasyAuth Emulator', { log: true });
@@ -21,6 +67,7 @@ export function activate(context: vscode.ExtensionContext): void {
         showCollapseAll: false,
     });
     treeProvider.update(emulator.getState());
+    treeProvider.updateIdps(getConfiguredIdps(), getIconsMode());
     treeView.description = emulator.getState();
 
     function updatePrivateBrowserContext(): void {
@@ -41,17 +88,20 @@ export function activate(context: vscode.ExtensionContext): void {
         treeView,
         emulator.onDidChangeState(state => {
             treeProvider.update(state);
+            treeProvider.updateIdps(getConfiguredIdps(), getIconsMode());
             treeView.description = state;
         }),
         vscode.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('easyauth')) {
                 updatePrivateBrowserContext();
                 void updateSecretContext();
+                treeProvider.updateIdps(getConfiguredIdps(), getIconsMode());
                 emulator.onConfigurationChanged();
             }
         }),
         context.secrets.onDidChange(() => {
             void updateSecretContext();
+            void emulator.updateStateForSecrets();
         }),
     );
 
@@ -98,6 +148,7 @@ export function activate(context: vscode.ExtensionContext): void {
             if (!emulator.isManagingSession(session.id)) return;
 
             await emulator.stop();
+            void emulator.updateStateForSecrets();
         })
     );
 
@@ -108,6 +159,13 @@ export function activate(context: vscode.ExtensionContext): void {
             switch (state) {
                 case 'unconfigured':
                     await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', '@ext:pnop.easyauth-emulator');
+                    break;
+                case 'missing_secret':
+                    await secretManager.promptMissingSecretsFromStatusBar();
+                    // State updates automatically via context.secrets.onDidChange
+                    break;
+                case 'missing_entra_issuer':
+                    await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', 'easyauth.entra.oidcIssuerUrl');
                     break;
                 case 'starting':
                     outputChannel.show();
@@ -149,62 +207,73 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
+    function launchInPrivateBrowser(url: string): void {
+        const cmd = vscode.workspace.getConfiguration('easyauth').get<string>('privateBrowser.command', '').trim();
+        if (!cmd) {
+            void vscode.window.showErrorMessage(
+                'EasyAuth: Set easyauth.privateBrowser.command in settings first.',
+                'Open Settings'
+            ).then(sel => {
+                if (sel === 'Open Settings') {
+                    void vscode.commands.executeCommand('easyauth.openSettings');
+                }
+            });
+            return;
+        }
+        // Guard the URL itself: only localhost http/https with a safe path is acceptable.
+        // This prevents shell metacharacters from reaching cmd.exe via a malformed URL.
+        if (!/^https?:\/\/localhost:\d{1,5}(\/[A-Za-z0-9._/-]*)?$/.test(url)) {
+            outputChannel.error(`[extension] Private browser launch blocked: unsafe URL: ${url}`);
+            void vscode.window.showErrorMessage('EasyAuth: Internal error: unsafe URL rejected.');
+            return;
+        }
+
+        const parts = cmd.split(/\s+/);
+
+        // Allowlist: letters, digits, hyphens, underscores, dots, slashes, colons (Windows paths).
+        // Rejects shell metacharacters (&, |, ;, $, `, etc.) that could inject commands.
+        const tokenOk = /^[A-Za-z0-9_.\\/:~-]+$/;
+        const badToken = parts.find(t => !tokenOk.test(t));
+        if (badToken) {
+            void vscode.window.showErrorMessage(
+                `EasyAuth: Unsafe character in privateBrowser.command token "${badToken}". Allowed: letters, digits, - _ . / \\ : ~`
+            );
+            return;
+        }
+
+        outputChannel.info(`[extension] Opening private browser: ${cmd} ${url}`);
+
+        // On Windows use `cmd /c start` so App Paths (msedge, chrome, etc.) are resolved
+        // via ShellExecuteEx — they are not on PATH and cp.spawn cannot find them directly.
+        // Tokens are validated above so no shell metacharacters can reach cmd.exe.
+        // On POSIX, `--` separates options from the URL to prevent flag-smuggling.
+        const proc = process.platform === 'win32'
+            ? cp.spawn('cmd', ['/c', 'start', '', ...parts, url], { detached: true, stdio: 'ignore' })
+            : cp.spawn(parts[0], [...parts.slice(1), '--', url], { detached: true, stdio: 'ignore' });
+
+        proc.on('error', (err) => {
+            outputChannel.error(`[extension] Private browser spawn error: ${err.message}`);
+            void vscode.window.showErrorMessage(`EasyAuth: Failed to launch browser: ${err.message}`);
+        });
+        proc.on('close', (code) => {
+            if (typeof code === 'number' && code !== 0) {
+                outputChannel.error(`[extension] Private browser exited with code ${code}`);
+                void vscode.window.showErrorMessage(
+                    `EasyAuth: Private browser command failed (exit ${code}). Check easyauth.privateBrowser.command.`
+                );
+            }
+        });
+        proc.unref();
+    }
+
     context.subscriptions.push(
         vscode.commands.registerCommand('easyauth.openInPrivateBrowser', () => {
-            const cmd = vscode.workspace.getConfiguration('easyauth').get<string>('privateBrowser.command', '').trim();
-            if (!cmd) {
-                void vscode.window.showErrorMessage(
-                    'EasyAuth: Set easyauth.privateBrowser.command in settings first.',
-                    'Open Settings'
-                ).then(sel => {
-                    if (sel === 'Open Settings') {
-                        void vscode.commands.executeCommand('easyauth.openSettings');
-                    }
-                });
-                return;
-            }
             const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
             if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
                 void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
                 return;
             }
-            const url = `http://localhost:${port}`;
-            const parts = cmd.split(/\s+/);
-
-            // Allowlist: letters, digits, hyphens, underscores, dots, slashes, colons (Windows paths).
-            // Rejects shell metacharacters (&, |, ;, $, `, etc.) that could inject commands.
-            const tokenOk = /^[A-Za-z0-9_.\\/:~-]+$/;
-            const badToken = parts.find(t => !tokenOk.test(t));
-            if (badToken) {
-                void vscode.window.showErrorMessage(
-                    `EasyAuth: Unsafe character in privateBrowser.command token "${badToken}". Allowed: letters, digits, - _ . / \\ : ~`
-                );
-                return;
-            }
-
-            outputChannel.info(`[extension] Opening private browser: ${cmd} ${url}`);
-
-            // On Windows use `cmd /c start` so App Paths (msedge, chrome, etc.) are resolved
-            // via ShellExecuteEx — they are not on PATH and cp.spawn cannot find them directly.
-            // Tokens are validated above so no shell metacharacters can reach cmd.exe.
-            // On POSIX, `--` separates options from the URL to prevent flag-smuggling.
-            const proc = process.platform === 'win32'
-                ? cp.spawn('cmd', ['/c', 'start', '', ...parts, url], { detached: true, stdio: 'ignore' })
-                : cp.spawn(parts[0], [...parts.slice(1), '--', url], { detached: true, stdio: 'ignore' });
-
-            proc.on('error', (err) => {
-                outputChannel.error(`[extension] Private browser spawn error: ${err.message}`);
-                void vscode.window.showErrorMessage(`EasyAuth: Failed to launch browser: ${err.message}`);
-            });
-            proc.on('close', (code) => {
-                if (typeof code === 'number' && code !== 0) {
-                    outputChannel.error(`[extension] Private browser exited with code ${code}`);
-                    void vscode.window.showErrorMessage(
-                        `EasyAuth: Private browser command failed (exit ${code}). Check easyauth.privateBrowser.command.`
-                    );
-                }
-            });
-            proc.unref();
+            launchInPrivateBrowser(`http://localhost:${port}`);
         })
     );
 
@@ -227,6 +296,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('easyauth.stop', async () => {
             await emulator.stop();
+            void emulator.updateStateForSecrets();
         })
     );
 
@@ -239,6 +309,28 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('easyauth.openOutput', () => {
             outputChannel.show();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('easyauth.idp.openInBrowser', (item: IdpTreeItem) => {
+            const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
+            if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+                void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
+                return;
+            }
+            void vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${port}/.auth/login/${item.idpKey}`));
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('easyauth.idp.openInPrivateBrowser', (item: IdpTreeItem) => {
+            const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
+            if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+                void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
+                return;
+            }
+            launchInPrivateBrowser(`http://localhost:${port}/.auth/login/${item.idpKey}`);
         })
     );
 

@@ -305,8 +305,8 @@ def _ensure_cookie_secret(env: dict[str, str], config_file: Path) -> None:
 # (kind, default_issuer, default_auth_provider, default_claim, skip_claims_default, default_code_challenge_method)
 # microsoft/google/apple always use S256; generic OIDC leaves it empty (configurable); non-OIDC providers omit it.
 _KIND_DEFAULTS: dict[str, tuple[str, str, str, str, bool, str]] = {
-    "microsoft":     ("oidc",     "https://login.microsoftonline.com/common/v2.0", "aad",      "preferred_username", True,  "S256"),
-    "apple":         ("oidc",     "https://appleid.apple.com",                     "apple",    "email",              False, "S256"),
+    "microsoft":     ("oidc",     "",                                               "aad",      "preferred_username", True,  "S256"),
+    "apple":         ("oidc",     "https://appleid.apple.com",                     "apple",    "sub",                False, "S256"),
     "google":        ("oidc",     "https://accounts.google.com",                   "google",   "email",              False, "S256"),
     "openid-connect":("oidc",     "",                                               "oidc",     "sub",                False, ""),
     "oidc":          ("oidc",     "",                                               "oidc",     "sub",                False, ""),
@@ -345,6 +345,7 @@ def _process_idp(env: dict, idp: str, port: int,
     _KIND_DEFAULT_SCOPES: dict[str, str] = {
         "github":   "user:email read:org",
         "facebook": "public_profile email",
+        "apple":    "openid name email",
     }
     default_scopes = _KIND_DEFAULT_SCOPES.get(idp_kind, "openid profile email")
     scopes         = _get(env, f"{pfx}_SCOPES", default_scopes)
@@ -389,6 +390,14 @@ def _process_idp(env: dict, idp: str, port: int,
     ]
     if skip_claims:
         args.append("--skip-claims-from-profile-url=true")
+    if idp_kind == "apple":
+        # Apple requires response_mode=form_post in the authorization URL.
+        args.append("--auth-request-response-mode=form_post")
+        # Apple only includes the email claim in the id_token on the first authorization.
+        # On subsequent sign-ins Apple omits email from both id_token and userinfo responses.
+        # Using the sub claim (always present) as the email identifier avoids the
+        # "neither the id_token nor the profileURL set an email" error.
+        args.append("--oidc-email-claim=sub")
     if oauth_provider_type == "oidc":
         args.append(f"--oidc-issuer-url={issuer_url}")
         if prompt:

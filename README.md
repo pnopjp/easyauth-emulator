@@ -40,10 +40,10 @@ Develop locally with an authentication model compatible with production Azure Ap
 
 - `GET /.auth/me`
 - `GET /.auth/login`
-- `GET /.auth/login/select` _(emulator only — not part of Azure Easy Auth)_
 - `GET /.auth/login/<idp>`
-- `GET /.auth/login/aad`
+  - e.g. `GET /.auth/login/aad`
 - `GET /.auth/logout`
+- `GET /.auth/login/select` _(emulator only — not part of Azure Easy Auth)_
 
 Any `/.auth/*` endpoint not listed above returns 404.
 
@@ -65,21 +65,21 @@ Not yet implemented: `X-MS-TOKEN-AAD-EXPIRES-ON`, `X-MS-TOKEN-AAD-REFRESH-TOKEN`
 ## Directory Layout
 
 ```text
-start.py               # Startup script
-README.md              # This file
-README_ja.md           # Japanese version
-config.toml            # Your configuration (copy from config.toml.example)
+start.py               # Startup script (source only)
 config.toml.example    # Configuration template
+config.toml            # Your configuration (copy from config.toml.example)
 src/
   app.py               # HTTP gateway and auth app
   sample_app.py        # Optional verification app
 bin/
   oauth2-proxy/
     oauth2-proxy[.exe] # oauth2-proxy binary (auto-downloaded on first run)
+scripts/
+  package.py           # Build script for unsupported platforms
 vscode-extension/      # VS Code extension (TypeScript)
 docs/
-  configuration-reference.md     # Full environment variable reference (English)
-  runtime-guide_ja.md  # Full environment variable reference (Japanese)
+  configuration-reference.md     # Full configuration reference (English)
+  configuration-reference_ja.md  # Full configuration reference (Japanese)
 ```
 
 ## Setup

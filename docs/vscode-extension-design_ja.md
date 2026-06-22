@@ -103,6 +103,8 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 | --- | --- | --- |
 | `stopped` | 未起動 | 初期状態、または正常停止後 |
 | `unconfigured` | 未設定 | VS Code 設定に IDP の clientId が設定されていない場合 |
+| `missing_secret` | シークレット未登録 | clientId は設定済みだが、クライアントシークレットが SecretStorage に登録されていない場合 |
+| `missing_entra_issuer` | Entra Issuer URL 未設定 | Entra の clientId とシークレットは設定済みだが、oidcIssuerUrl が空の場合（Entra のみ対象） |
 | `starting` | 起動処理中 | `easyauth-emulator` を実行した直後 |
 | `running` | 正常稼働中 | stdout に `All processes started` を検出 |
 | `error` | 異常終了 | プロセスが非ゼロ終了コードで終了、またはタイムアウト |
@@ -335,6 +337,8 @@ easyauth-emulator --app-upstream http://localhost:8081
 | --- | --- | --- |
 | `stopped` | `$(shield) EasyAuth: stopped` | ポート検知して起動 |
 | `unconfigured` | `$(warning) EasyAuth: no config` | 拡張機能の設定画面を開く |
+| `missing_secret` | `$(lock) EasyAuth: secret missing`（黄色背景） | クライアントシークレット入力ポップアップを表示 |
+| `missing_entra_issuer` | `$(warning) EasyAuth: Entra issuer missing`（黄色背景） | ワークスペース設定の `easyauth.entra.oidcIssuerUrl` を開く |
 | `starting` | `$(sync~spin) EasyAuth: starting...` | Output Channel を開く |
 | `running` | `$(shield) EasyAuth: 8080:8081`（リッスンポート:アップストリームポート） | ブラウザでエミュレーターを開く |
 | `error` | `$(error) EasyAuth: error` | 1回目: Output Channel を開く / 2回目以降: ポート検知して再起動 |

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 const BUILTIN_IDPS = [
-    { key: 'entra',    label: 'Microsoft Entra' },
+    { key: 'entra',    label: 'Microsoft Entra ID' },
     { key: 'google',   label: 'Google' },
     { key: 'facebook', label: 'Facebook' },
     { key: 'apple',    label: 'Apple' },
@@ -177,6 +177,60 @@ export class SecretManager {
             await this.set(idpKey, secret.trim());
         }
 
+        return true;
+    }
+
+    private async getMissingSecretItems(): Promise<IdpItem[]> {
+        const config = vscode.workspace.getConfiguration('easyauth');
+        const missing: IdpItem[] = [];
+
+        for (const { key, label } of BUILTIN_IDPS) {
+            if (!config.get<string>(`${key}.clientId`, '').trim()) continue;
+            if (!await this.get(key)) {
+                missing.push({ label, idpKey: key });
+            }
+        }
+
+        const customs = config.get<Array<{ name?: string; clientId?: string }>>('customIdps', []);
+        for (const c of customs) {
+            const name = c.name?.trim();
+            if (!name || !c.clientId?.trim()) continue;
+            if (!await this.get(`custom:${name}`)) {
+                missing.push({ label: name, description: 'custom', idpKey: `custom:${name}` });
+            }
+        }
+
+        return missing;
+    }
+
+    async promptMissingSecretsFromStatusBar(): Promise<boolean> {
+        const missing = await this.getMissingSecretItems();
+        if (missing.length === 0) return true;
+
+        let target: IdpItem;
+        if (missing.length === 1) {
+            target = missing[0];
+        } else {
+            const picked = await vscode.window.showQuickPick(missing, {
+                placeHolder: 'Select IDP to set client secret',
+            });
+            if (!picked) return false;
+            target = picked;
+        }
+
+        const secret = await vscode.window.showInputBox({
+            prompt: `Enter client secret for ${target.label}`,
+            password: true,
+            ignoreFocusOut: true,
+        });
+        if (secret === undefined) return false;
+        if (!secret.trim()) {
+            vscode.window.showWarningMessage('Client secret cannot be empty.');
+            return false;
+        }
+
+        await this.set(target.idpKey, secret.trim());
+        void vscode.window.showInformationMessage(`Client secret for ${target.label} saved.`);
         return true;
     }
 

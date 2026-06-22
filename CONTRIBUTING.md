@@ -56,12 +56,9 @@ Official distributable binaries are built and published by GitHub Actions.
 
 ### Browser
 
-When testing the emulator locally, use an external browser (Chrome, Edge, Firefox).
+When testing the emulator locally, use an external browser (Chrome, Edge, Firefox, Safari).
 
 VS Code's built-in **Simple Browser** does not work with OAuth2 flows — its WebView has limited Cookie support, which causes a blank page after the authentication callback.
-
-
-Local binary build is for development verification only.
 
 ### Prerequisites
 
@@ -70,8 +67,8 @@ Local binary build is for development verification only.
 
 ### Command
 
-Use `scripts/package.py` to run PyInstaller and produce a distributable archive in one step.
-Supports Windows (`.zip`), macOS, and Linux (`.tar.gz`) with `amd64` / `arm64` / `arm` architectures.
+Use `scripts/package.py` to verify that your changes produce a working binary before pushing to CI.
+Runs PyInstaller and produces a local archive. Supports Windows (`.zip`), macOS, and Linux (`.tar.gz`) with `amd64` / `arm64` / `arm` architectures.
 
 ```powershell
 python scripts/package.py
@@ -82,11 +79,6 @@ To skip the PyInstaller build and repackage an existing `dist/` output:
 ```powershell
 python scripts/package.py --skip-build
 ```
-
-### Notes
-
-- This script is for development verification only.
-- Distributed binaries must come from GitHub Actions artifacts.
 
 ---
 
@@ -101,7 +93,8 @@ Create `config.toml` in the project root (copy from `config.toml.example` and fi
 **Steps:**
 
 1. Open the repository root in VS Code.
-2. Press `F5` (or select **Debug Emulator** from the Run and Debug panel).
+2. In the Run and Debug panel, select **Debug Emulator** from the configuration dropdown.
+3. Press `F5`.
 
 ---
 
@@ -161,27 +154,18 @@ IDP_ENTRA_SCOPES = openid profile email api://<client-id>/<scope-name>
 
 ## VS Code Extension Build
 
-**Requirements:** Node.js 18 or later, npm.
-
-### Compile TypeScript
-
-```powershell
-cd vscode-extension
-npm install
-npm run compile
-```
-
-Output is written to `vscode-extension/out/`.
-
-To watch for changes during development:
-
-```powershell
-npm run watch
-```
+**Requirements:** Node.js 24 or later, npm.
 
 ### Run in Extension Development Host (F5)
 
 The `Debug Extension` launch configuration (`.vscode/launch.json`) opens an Extension Development Host with the extension loaded, and optionally opens a test App Service project in that host window.
+
+**Prerequisites:**
+
+```powershell
+cd vscode-extension
+npm install
+```
 
 **Environment variable (optional):**
 
@@ -192,32 +176,25 @@ If the variable is not set, the Extension Development Host opens without a folde
 **Steps:**
 
 1. Open the repository root in VS Code.
-2. Press `F5` (or select **Debug Extension** from the Run and Debug panel) to launch the Extension Development Host.
+2. In the Run and Debug panel, select **Debug Extension** from the configuration dropdown.
+3. Press `F5` to launch the Extension Development Host.
 
-### Package as VSIX (for distribution)
+### Package as VSIX (local verification only)
 
-The VSIX bundles the emulator binary, so build it first:
-
-```powershell
-python scripts/package.py
-```
-
-Then package the extension:
+The VSIX bundles the emulator binary. Use `--vsix` to build both in one step:
 
 ```powershell
-cd vscode-extension
-npm install
-npm run package
+python scripts/package.py --vsix
 ```
 
-This produces `easyauth-emulator-<version>-win32-x64.vsix`.
+This runs PyInstaller, creates the distributable archive, and packages the VSIX.
+To skip the PyInstaller step when the binary is already in `dist/`:
 
-The `npm run package` script copies the binary from `../dist/easyauth-emulator/` into the VSIX automatically.
+```powershell
+python scripts/package.py --skip-build --vsix
+```
 
-### Build Notes
-
-- Do not commit `node_modules/` or `out/` (both are in `.gitignore`).
-- Official VSIX artifacts are built by GitHub Actions; do not treat locally built packages as release artifacts.
+This produces `easyauth-emulator-<version>-win32-x64.vsix` in `vscode-extension/`.
 
 ### README Diagram Images
 
