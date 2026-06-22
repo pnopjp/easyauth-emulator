@@ -66,7 +66,7 @@ Use `IDP_<NAME>_*` entries for each IDP listed in `IDP_LIST`, where `<NAME>` is 
 
 | KIND | Default |
 | --- | --- |
-| `microsoft` | `https://login.microsoftonline.com/common/v2.0` (use a tenant-specific URL for Entra ID) |
+| `microsoft` | — (required) |
 | `google` | `https://accounts.google.com` |
 | `apple` | `https://appleid.apple.com` |
 | `oidc` | — (required) |

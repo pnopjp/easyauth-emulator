@@ -87,6 +87,8 @@ The status bar item in the bottom-left corner shows the emulator state at a glan
 | Display | Meaning | Click action |
 | --- | --- | --- |
 | `$(warning) EasyAuth: no config` | Not configured (no IdP set up) | Open Settings |
+| `$(lock) EasyAuth: secret missing` (yellow background) | Client ID configured, client secret not stored | Prompt to enter client secret |
+| `$(warning) EasyAuth: Entra issuer missing` (yellow background) | Entra client ID and secret set, OIDC Issuer URL missing | Open `easyauth.entra.oidcIssuerUrl` in workspace settings |
 | `$(sync~spin) EasyAuth: starting...` | Emulator is starting | Open output |
 | `$(shield) EasyAuth: 8080:3000` | Running — gateway port and upstream port | Open in browser |
 | `$(shield) EasyAuth: stopped` | Stopped | Start emulator |
@@ -249,6 +251,14 @@ Not yet implemented: `X-MS-TOKEN-AAD-EXPIRES-ON`, `X-MS-TOKEN-AAD-REFRESH-TOKEN`
 ### Status bar shows `$(warning) EasyAuth: no config`
 
 No IdP is configured. Set at least one `clientId` in your workspace settings, then run **EasyAuth Emulator: Set Client Secret** from the Command Palette.
+
+### Status bar shows `$(lock) EasyAuth: secret missing`
+
+A Client ID is configured but no client secret has been stored yet. Click the status bar item to open the secret entry prompt, or run **EasyAuth Emulator: Set Client Secret** from the Command Palette. The status bar switches to `stopped` automatically after the secret is saved.
+
+### Status bar shows `$(warning) EasyAuth: Entra issuer missing`
+
+Microsoft Entra's client ID and secret are configured, but the OIDC Issuer URL is not set. Click the status bar item to open the `easyauth.entra.oidcIssuerUrl` field in workspace settings. Enter a tenant-specific issuer URL, for example: `https://login.microsoftonline.com/<tenant-id>/v2.0`.
 
 ### Emulator starts but one of my IdPs is not working
 

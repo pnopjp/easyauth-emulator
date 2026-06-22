@@ -102,6 +102,8 @@ VS Code UI (display only)  ←─→   VS Code Extension Host
 | --- | --- | --- |
 | `stopped` | Not running | Initial state, or after a clean stop |
 | `unconfigured` | Not configured | No IDP `clientId` set in VS Code settings |
+| `missing_secret` | Secret not stored | `clientId` is set but no client secret is stored in SecretStorage |
+| `missing_entra_issuer` | Entra Issuer URL missing | Entra `clientId` and secret are set but `oidcIssuerUrl` is empty (Entra only) |
 | `starting` | Starting up | Immediately after launching `easyauth-emulator` |
 | `running` | Running normally | `All processes started` detected in stdout |
 | `error` | Abnormal exit | Process exited with non-zero code, or startup timed out |
@@ -334,6 +336,8 @@ easyauth-emulator --app-upstream http://localhost:8081
 | --- | --- | --- |
 | `stopped` | `$(shield) EasyAuth: stopped` | Detect port and start |
 | `unconfigured` | `$(warning) EasyAuth: no config` | Open extension settings |
+| `missing_secret` | `$(lock) EasyAuth: secret missing` (yellow background) | Prompt to enter client secret |
+| `missing_entra_issuer` | `$(warning) EasyAuth: Entra issuer missing` (yellow background) | Open `easyauth.entra.oidcIssuerUrl` in workspace settings |
 | `starting` | `$(sync~spin) EasyAuth: starting...` | Open Output Channel |
 | `running` | `$(shield) EasyAuth: 8080:8081` (listen port : upstream port) | Open emulator in browser |
 | `error` | `$(error) EasyAuth: error` | 1st click: open Output Channel / subsequent clicks: detect port and restart |

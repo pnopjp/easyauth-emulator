@@ -52,6 +52,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
         context.secrets.onDidChange(() => {
             void updateSecretContext();
+            void emulator.updateStateForSecrets();
         }),
     );
 
@@ -98,6 +99,7 @@ export function activate(context: vscode.ExtensionContext): void {
             if (!emulator.isManagingSession(session.id)) return;
 
             await emulator.stop();
+            void emulator.updateStateForSecrets();
         })
     );
 
@@ -108,6 +110,13 @@ export function activate(context: vscode.ExtensionContext): void {
             switch (state) {
                 case 'unconfigured':
                     await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', '@ext:pnop.easyauth-emulator');
+                    break;
+                case 'missing_secret':
+                    await secretManager.promptMissingSecretsFromStatusBar();
+                    // State updates automatically via context.secrets.onDidChange
+                    break;
+                case 'missing_entra_issuer':
+                    await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', 'easyauth.entra.oidcIssuerUrl');
                     break;
                 case 'starting':
                     outputChannel.show();
@@ -227,6 +236,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('easyauth.stop', async () => {
             await emulator.stop();
+            void emulator.updateStateForSecrets();
         })
     );
 

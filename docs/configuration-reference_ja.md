@@ -66,7 +66,7 @@
 
 | KIND | 既定値 |
 | --- | --- |
-| `microsoft` | `https://login.microsoftonline.com/common/v2.0`（Entra ID ではテナント固有 URL を推奨） |
+| `microsoft` | — （必須） |
 | `google` | `https://accounts.google.com` |
 | `apple` | `https://appleid.apple.com` |
 | `oidc` | — （必須） |

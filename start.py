@@ -305,7 +305,7 @@ def _ensure_cookie_secret(env: dict[str, str], config_file: Path) -> None:
 # (kind, default_issuer, default_auth_provider, default_claim, skip_claims_default, default_code_challenge_method)
 # microsoft/google/apple always use S256; generic OIDC leaves it empty (configurable); non-OIDC providers omit it.
 _KIND_DEFAULTS: dict[str, tuple[str, str, str, str, bool, str]] = {
-    "microsoft":     ("oidc",     "https://login.microsoftonline.com/common/v2.0", "aad",      "preferred_username", True,  "S256"),
+    "microsoft":     ("oidc",     "",                                               "aad",      "preferred_username", True,  "S256"),
     "apple":         ("oidc",     "https://appleid.apple.com",                     "apple",    "email",              False, "S256"),
     "google":        ("oidc",     "https://accounts.google.com",                   "google",   "email",              False, "S256"),
     "openid-connect":("oidc",     "",                                               "oidc",     "sub",                False, ""),

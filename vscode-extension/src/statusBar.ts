@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-export type EmulatorState = 'stopped' | 'unconfigured' | 'starting' | 'running' | 'error';
+export type EmulatorState = 'stopped' | 'unconfigured' | 'missing_secret' | 'missing_entra_issuer' | 'starting' | 'running' | 'error';
 
 export class StatusBarManager implements vscode.Disposable {
     private readonly item: vscode.StatusBarItem;
@@ -25,6 +25,16 @@ export class StatusBarManager implements vscode.Disposable {
             case 'unconfigured':
                 this.item.text = '$(warning) EasyAuth: no config';
                 this.item.tooltip = 'EasyAuth Emulator: no config. Click to open Settings.';
+                break;
+            case 'missing_secret':
+                this.item.text = '$(lock) EasyAuth: secret missing';
+                this.item.tooltip = 'EasyAuth Emulator: client secret is not set. Click to enter client secret.';
+                this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+                break;
+            case 'missing_entra_issuer':
+                this.item.text = '$(warning) EasyAuth: Entra issuer missing';
+                this.item.tooltip = 'EasyAuth Emulator: Microsoft Entra OIDC Issuer URL is not set. Click to open Entra settings.';
+                this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
                 break;
             case 'starting':
                 this.item.text = '$(sync~spin) EasyAuth: starting...';

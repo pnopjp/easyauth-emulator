@@ -89,6 +89,8 @@ http://localhost:8080/oauth2/callback
 | 表示 | 意味 | クリック時の動作 |
 | --- | --- | --- |
 | `$(warning) EasyAuth: no config` | 未設定（IdP が構成されていない） | Settings を開く |
+| `$(lock) EasyAuth: secret missing`（黄色背景） | Client ID 設定済み・クライアントシークレット未登録 | クライアントシークレットの入力ポップアップを表示 |
+| `$(warning) EasyAuth: Entra issuer missing`（黄色背景） | Entra の Client ID・シークレット設定済み・OIDC Issuer URL 未設定 | Settings の `easyauth.entra.oidcIssuerUrl` を開く |
 | `$(sync~spin) EasyAuth: starting...` | 起動中 | 出力チャンネルを開く |
 | `$(shield) EasyAuth: 8080:3000` | 実行中 — ゲートウェイポートとアプリのポート | ブラウザで開く |
 | `$(shield) EasyAuth: stopped` | 停止中 | エミュレーターを起動 |
@@ -152,8 +154,6 @@ http://localhost:8080/oauth2/callback
 > ```
 >
 > テナント ID は Azure ポータルの「Microsoft Entra ID」→「概要」で確認できます。
->
-> 空欄にするとマルチテナント用共通エンドポイント（`https://login.microsoftonline.com/common/v2.0`）が使われ、任意のテナントのアカウントでログイン可能になります。
 
 ### カスタム OIDC プロバイダー
 
@@ -282,6 +282,14 @@ http://localhost:8080/oauth2/callback
 ### ステータスバーに `$(warning) EasyAuth: no config` が表示される
 
 IdP が設定されていません。ワークスペース設定で少なくとも 1 つの `clientId` を入力し、コマンドパレットから **EasyAuth Emulator: Set Client Secret** を実行してください。
+
+### ステータスバーに `$(lock) EasyAuth: secret missing` が表示される
+
+Client ID は登録されていますが、クライアントシークレットが未登録です。ステータスバーをクリックするとシークレット入力ポップアップが表示されます。または、コマンドパレットから **EasyAuth Emulator: Set Client Secret** を実行してください。シークレットを保存すると自動的に `stopped` 状態に切り替わります。
+
+### ステータスバーに `$(warning) EasyAuth: Entra issuer missing` が表示される
+
+Microsoft Entra の Client ID とクライアントシークレットは設定済みですが、OIDC Issuer URL が未設定です。ステータスバーをクリックすると、ワークスペース設定の `easyauth.entra.oidcIssuerUrl` フィールドが開きます。テナント固有の Issuer URL（例: `https://login.microsoftonline.com/<テナントID>/v2.0`）を入力してください。
 
 ### エミュレーターは起動するが、特定の IdP が動作しない
 

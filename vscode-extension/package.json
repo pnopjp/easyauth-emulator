@@ -180,14 +180,14 @@
             "default": "",
             "scope": "resource",
             "order": 4,
-            "markdownDescription": "`IDP_ENTRA_OIDC_ISSUER_URL`: Full OIDC issuer URL. Example: `https://login.microsoftonline.com/<tenantId>/v2.0`. Leave empty to use the common endpoint (allows any tenant)."
+            "markdownDescription": "`IDP_ENTRA_OIDC_ISSUER_URL`: Full OIDC issuer URL (required). Example: `https://login.microsoftonline.com/<tenantId>/v2.0`."
           },
           "easyauth.entra.scopes": {
             "type": "string",
             "default": "",
             "scope": "resource",
             "order": 5,
-            "markdownDescription": "`IDP_ENTRA_SCOPES`: Space-separated OAuth2 scopes. Default: `openid profile email`. Add Microsoft Graph scopes here (e.g. `openid profile email https://graph.microsoft.com/User.Read`)."
+            "markdownDescription": "`IDP_ENTRA_SCOPES`: Space-separated OAuth2 scopes. Default: `openid profile email`. Add delegated permission scopes as needed (e.g. `openid profile email api://<app-id>/MyScope`)."
           },
           "easyauth.entra.authUserIdClaim": {
             "type": "string",

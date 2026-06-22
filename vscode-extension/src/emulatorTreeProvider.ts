@@ -14,8 +14,10 @@ class EmulatorStatusItem extends vscode.TreeItem {
             case 'running':      return new vscode.ThemeIcon('shield', new vscode.ThemeColor('testing.iconPassed'));
             case 'starting':     return new vscode.ThemeIcon('sync~spin');
             case 'error':        return new vscode.ThemeIcon('error');
-            case 'unconfigured': return new vscode.ThemeIcon('warning');
-            default:             return new vscode.ThemeIcon('shield');
+            case 'unconfigured':    return new vscode.ThemeIcon('warning');
+            case 'missing_secret':       return new vscode.ThemeIcon('lock');
+            case 'missing_entra_issuer': return new vscode.ThemeIcon('warning');
+            default:                     return new vscode.ThemeIcon('shield');
         }
     }
 
@@ -24,8 +26,10 @@ class EmulatorStatusItem extends vscode.TreeItem {
             case 'running':      return 'running';
             case 'starting':     return 'starting...';
             case 'error':        return 'error';
-            case 'unconfigured': return 'not configured';
-            default:             return 'stopped';
+            case 'unconfigured':    return 'not configured';
+            case 'missing_secret':       return 'secret missing';
+            case 'missing_entra_issuer': return 'Entra issuer missing';
+            default:                     return 'stopped';
         }
     }
 }
