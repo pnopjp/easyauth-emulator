@@ -8,8 +8,8 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["node"],
+    "types": ["node", "mocha"],
     "forceConsistentCasingInFileNames": true
   },
-  "exclude": ["node_modules", ".vscode-test", "tests", "vitest.config.ts"]
+  "exclude": ["node_modules", ".vscode-test"]
 }

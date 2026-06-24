@@ -53,6 +53,11 @@ function getIconsMode(): string {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+    if (vscode.env.uiKind === vscode.UIKind.Web) {
+        void vscode.window.showErrorMessage('EasyAuth Emulator is not supported in VS Code for Web.');
+        return;
+    }
+
     const outputChannel = vscode.window.createOutputChannel('EasyAuth Emulator', { log: true });
     const statusBar = new StatusBarManager();
     const secretManager = new SecretManager(context);

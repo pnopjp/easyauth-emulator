@@ -1,8 +1,8 @@
 node_modules/
 out/
+dist/
+.vscode-test/
 *.vsix
 *.vsix.zip
 bin/
 LICENSE
-vitest.config.js
-vitest.config.js.map

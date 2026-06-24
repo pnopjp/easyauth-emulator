@@ -38,6 +38,17 @@
         "panel": "dedicated"
       },
       "problemMatcher": "$tsc"
+    },
+    {
+      "label": "build: extension with tests",
+      "type": "shell",
+      "command": "pyinstaller easyauth-emulator.spec --distpath vscode-extension/bin --noconfirm && npm --prefix vscode-extension run pretest",
+      "presentation": {
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated"
+      },
+      "problemMatcher": "$tsc"
     }
   ]
 }

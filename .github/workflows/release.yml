@@ -114,9 +114,9 @@ jobs:
         working-directory: vscode-extension
         run: npm ci
 
-      - name: TypeScript unit tests
+      - name: TypeScript tests (Linux — needs virtual display)
         working-directory: vscode-extension
-        run: npm test
+        run: xvfb-run -a npm test
 
   # ─────────────────────────────────────────────────────────────────────────
   # Smoke test — verify each platform binary starts cleanly
@@ -163,41 +163,6 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────
   # Publish — GitHub Release + VS Code Marketplace
-  #
-  # Manual approval gate:
-  #   This job uses the "production" environment.
-  #   Add yourself as a Required reviewer in:
-  #     GitHub repo → Settings → Environments → production → Required reviewers
-  #   The job will pause here until you approve after manual testing.
-  #
-  # VS Code Marketplace (Entra ID / OIDC — no long-lived secrets):
-  #   Enabled when repository variable AZURE_CLIENT_ID is set.
-  #   Without it the Marketplace step is skipped and only the GitHub Release
-  #   is created.
-  #
-  #   One-time setup:
-  #   1. Entra ID — App registration
-  #      az ad app create --display-name "easyauth-emulator-publisher"
-  #      az ad sp create --id <appId>
-  #
-  #   2. Federated credential (trusts this workflow on release tags)
-  #      az ad app federated-credential create \
-  #        --id <appId> \
-  #        --parameters '{
-  #          "name": "github-release",
-  #          "issuer": "https://token.actions.githubusercontent.com",
-  #          "subject": "repo:<owner>/<repo>:environment:production",
-  #          "audiences": ["api://AzureADTokenExchange"]
-  #        }'
-  #
-  #   3. Azure DevOps — grant publisher access to the service principal
-  #      dev.azure.com/<org> → Organization settings → Users
-  #      → Add user (use the service principal's object ID or client ID)
-  #      → Assign "Basic" access level, then grant Marketplace: Manage
-  #
-  #   4. GitHub — repository variables (Settings → Variables → Actions)
-  #      AZURE_CLIENT_ID  = <appId>
-  #      AZURE_TENANT_ID  = <tenantId>
   # ─────────────────────────────────────────────────────────────────────────
   publish:
     name: Publish

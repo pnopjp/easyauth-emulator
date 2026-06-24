@@ -14,7 +14,7 @@ push v*.*.*
      ▼
   test
   ├─ Python 単体テスト     （pytest、任意の 1 プラットフォーム）
-  ├─ TypeScript 単体テスト （vitest、任意の 1 プラットフォーム）
+  ├─ TypeScript テスト      （@vscode/test-cli + Mocha、任意の 1 プラットフォーム）
   └─ バイナリ スモークテスト（各ビルド成果物、全プラットフォーム）
      │
      ▼
@@ -61,24 +61,36 @@ push v*.*.*
 
 ---
 
-## Layer 2 — TypeScript 単体テスト
+## Layer 2 — TypeScript テスト
 
-**フレームワーク:** vitest  
-**格納場所:** `vscode-extension/tests/`  
+**フレームワーク:** `@vscode/test-cli` + Mocha（VS Code Extension Host 上で実行）  
+**格納場所:** `vscode-extension/src/test/`  
 **実行タイミング:** CI `test` ジョブ、任意の 1 プラットフォーム
+
+実テストは 2 種類に分かれます。
+
+### ユニットテスト（`src/test/portDetector.test.ts`）
 
 `vscode-extension/src/portDetector.ts` の VS Code API に依存しない純粋ロジックメソッドを対象とします。
 private メソッドは `(instance as any).method(...)` 経由でアクセスします。
 
-### テスト対象
-
 | メソッド | ファイル:行 | テストシナリオ |
 | --- | --- | --- |
-| `extractPortFromText(text)` | `portDetector.ts:250` | .NET: `"Now listening on: http://localhost:5000"` → `5000`；Tomcat: `"Tomcat started on port 8080"` → `8080`；汎用: `"listening on port 3000"` → `3000`；Flask: `"Running on http://127.0.0.1:5000"` → `5000`；Uvicorn: `"Uvicorn running on http://0.0.0.0:8000"` → `8000`；マッチしないテキスト → `null` |
+| `extractPortFromText(text)` | `portDetector.ts:264` | .NET: `"Now listening on: http://localhost:5000"` → `5000`；Tomcat: `"Tomcat started on port 8080"` → `8080`；汎用: `"listening on port 3000"` → `3000`；Flask: `"Running on http://127.0.0.1:5000"` → `5000`；Uvicorn: `"Uvicorn running on http://0.0.0.0:8000"` → `8000`；マッチしないテキスト → `null` |
 | `portFromUrlList(urlStr)` | `portDetector.ts:160` | 単一 URL → ポート番号；セミコロン区切りリストで HTTP を HTTPS より優先；末尾スラッシュを正しく処理；明示ポートのない URL → `null`；空文字列 → `null` |
-| `portFromLaunchConfig(cfg)` | `portDetector.ts:135` | `env.PORT` 設定 → 返す；`ASPNETCORE_URLS` → ポート抽出；`ASPNETCORE_HTTP_PORTS` → 先頭ポート抽出；`applicationUrl` 文字列 → ポート抽出；いずれも未設定 → `null` |
+| `portFromLaunchConfig(cfg)` | `portDetector.ts:136` | `env.PORT` 設定 → 返す；`ASPNETCORE_URLS` → ポート抽出；`ASPNETCORE_HTTP_PORTS` → 先頭ポート抽出；`applicationUrl` 文字列 → ポート抽出；いずれも未設定 → `null` |
 
-> **現時点で対象外:** `detect()`・`fromLaunchJson()`・`detectFramework()`・`fromConfigFile()` は `vscode.workspace` や `fs` に依存しており、`@vscode/test-electron` または大規模なモックが必要なため、将来のマイルストーンに持ち越します。
+> **現時点で対象外:** `detect()`・`fromLaunchJson()`・`detectFramework()`・`fromConfigFile()` は `vscode.workspace` や `fs` に依存しており、将来のマイルストーンに持ち越します。
+
+### 統合テスト（`src/test/extension.test.ts`）
+
+実際の VS Code Extension Host 上で拡張機能を起動して検証します。
+
+| テスト | 内容 |
+| --- | --- |
+| extension is present | `pnop.easyauth-emulator` がインストール済みであること |
+| extension is active | `activate()` 後に `isActive === true` であること |
+| all commands are registered | 全 11 コマンド（`easyauth.start` 等）がコマンドパレットに登録済みであること |
 
 ---
 
@@ -106,7 +118,7 @@ private メソッドは `(instance as any).method(...)` 経由でアクセスし
 
 | レイヤー | 内容 | 優先度 |
 | --- | --- | --- |
-| VS Code 拡張機能 統合テスト | `@vscode/test-electron` + Mocha；`EmulatorManager` 状態遷移・`PortDetector.detect()` フロー全体 | CI での VS Code ヘッドレスセットアップが必要 |
+| VS Code 拡張機能 統合テスト（拡充） | `EmulatorManager` 状態遷移・`PortDetector.detect()` フロー全体（基本的な起動・コマンド登録テストは実装済み） | `vscode.workspace` や `fs` に依存するため追加のセットアップが必要 |
 | E2E / HTTP 統合テスト | ゲートウェイを起動してリクエストを送り、レスポンスヘッダーをアサート | モック oauth2-proxy または実際の IDP クレデンシャルが必要 |
 | 設定バリデーションテスト | 不正な `config.toml` を渡してエラーハンドリングを検証 | 優先度低（既存の TOML パースでほぼカバー済み） |
 
@@ -132,7 +144,7 @@ cd vscode-extension
 # 依存パッケージのインストール（初回のみ）
 npm install
 
-# 単体テストを実行
+# テストを実行（esbuild バンドル + tsc コンパイル → VS Code Extension Host 上で実行）
 npm test
 ```
 
