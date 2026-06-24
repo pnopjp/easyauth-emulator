@@ -253,10 +253,11 @@ http://localhost:8080/oauth2/callback
 | --- | --- |
 | `GET /.auth/me` | 現在のユーザーのクレームを JSON で返す |
 | `GET /.auth/login` | 設定済み IdP のログイン画面へリダイレクト |
-| `GET /.auth/login/select` | IdP 選択画面を表示（複数 IdP 設定時）— エミュレーター独自実装、Azure Easy Auth には存在しない |
 | `GET /.auth/login/<idp>` | 指定した IdP でログイン |
 | `GET /.auth/login/aad` | `entra` のエイリアス（Azure AD 互換） |
 | `GET /.auth/logout` | ログアウトしてセッションをクリア |
+| `GET /.auth/refresh` | Azure Easy Auth 互換のためのダミー実装 — 認証済みは 200、未認証は 401 を返す。トークン更新は行わない |
+| `GET /.auth/login/select` | IdP 選択画面を表示（複数 IdP 設定時）— エミュレーター独自実装、Azure Easy Auth には存在しない |
 
 ---
 

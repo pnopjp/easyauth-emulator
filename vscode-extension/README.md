@@ -222,10 +222,11 @@ The extension always passes `--config .vscode/easyauth.toml` to the emulator on 
 | --- | --- |
 | `GET /.auth/me` | Returns the current user's claims as JSON |
 | `GET /.auth/login` | Redirects to the configured IdP login |
-| `GET /.auth/login/select` | Shows the IdP selection screen (multi-IdP) — emulator only, not part of Azure Easy Auth |
 | `GET /.auth/login/<idp>` | Logs in with the specified IdP |
 | `GET /.auth/login/aad` | Alias for `entra` (Azure AD compatibility) |
 | `GET /.auth/logout` | Logs out and clears the session |
+| `GET /.auth/refresh` | Stub for Azure Easy Auth compatibility — returns 200 if authenticated, 401 if not; no token refresh is performed |
+| `GET /.auth/login/select` | Shows the IdP selection screen (multi-IdP) — emulator only, not part of Azure Easy Auth |
 
 ---
 

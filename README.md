@@ -43,6 +43,7 @@ Develop locally with an authentication model compatible with production Azure Ap
 - `GET /.auth/login/<idp>`
   - e.g. `GET /.auth/login/aad`
 - `GET /.auth/logout`
+- `GET /.auth/refresh` _(stub implementation — returns 200 if authenticated, 401 if not; no token refresh is performed)_
 - `GET /.auth/login/select` _(emulator only — not part of Azure Easy Auth)_
 
 Any `/.auth/*` endpoint not listed above returns 404.
@@ -179,7 +180,7 @@ A VS Code extension in `vscode-extension/` automatically starts and stops the em
 - Not a byte-for-byte implementation of Azure Easy Auth.
 - Designed for local development and compatibility testing.
 - Header coverage is partial (`X-MS-TOKEN-AAD-EXPIRES-ON` and `X-MS-TOKEN-AAD-REFRESH-TOKEN` are not implemented).
-- Endpoint coverage is partial (only the documented `/.auth/*` endpoints above are implemented).
+- Endpoint coverage is partial (only the documented `/.auth/*` endpoints above are implemented). `/.auth/refresh` is a stub — it does not perform token refresh.
 - `/.auth/logout` always clears the local emulator and oauth2-proxy session first; provider-side browser SSO sign-out is best-effort.
 - Login flow includes emulator-specific behavior (`/.auth/login/select`, `DEFAULT_IDP`, single-item `IDP_LIST` default handling).
 - Session handling is based on oauth2-proxy cookies and emulator routing rules, so behavior can differ from managed Easy Auth internals.
