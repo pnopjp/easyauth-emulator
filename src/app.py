@@ -432,6 +432,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_auth_logout()
         elif path.startswith("/.auth/provider_logout/"):
             self._handle_auth_provider_logout(path[len("/.auth/provider_logout/"):])
+        elif path == "/.auth/refresh":
+            self._handle_auth_refresh()
         elif path.startswith("/.auth/"):
             self._send_empty(404)
         elif path == "/.debug/headers":
@@ -747,6 +749,24 @@ class _Handler(BaseHTTPRequestHandler):
             self._redirect(provider_logout_url)
             return
         self._redirect(rd)
+
+    def _handle_auth_refresh(self) -> None:
+        idp = self._current_idp()
+        if not idp:
+            self._send_empty(401)
+            return
+        auth_result = _check_auth(
+            idp,
+            cookie=self._header("Cookie"),
+            real_ip=self._client_ip(),
+            proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
+            host=self._header("Host"),
+            uri=self.path,
+        )
+        if not auth_result:
+            self._send_empty(401)
+            return
+        self._send_empty(200)
 
     def _handle_debug_headers(self) -> None:
         if not DEBUG_HEADERS_ENDPOINT_ENABLED:

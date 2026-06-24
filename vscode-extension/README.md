@@ -222,10 +222,11 @@ The extension always passes `--config .vscode/easyauth.toml` to the emulator on 
 | --- | --- |
 | `GET /.auth/me` | Returns the current user's claims as JSON |
 | `GET /.auth/login` | Redirects to the configured IdP login |
-| `GET /.auth/login/select` | Shows the IdP selection screen (multi-IdP) — emulator only, not part of Azure Easy Auth |
 | `GET /.auth/login/<idp>` | Logs in with the specified IdP |
 | `GET /.auth/login/aad` | Alias for `entra` (Azure AD compatibility) |
 | `GET /.auth/logout` | Logs out and clears the session |
+| `GET /.auth/refresh` | Stub for Azure Easy Auth compatibility — returns 200 if authenticated, 401 if not; no token refresh is performed |
+| `GET /.auth/login/select` | Shows the IdP selection screen (multi-IdP) — emulator only, not part of Azure Easy Auth |
 
 ---
 
@@ -258,17 +259,7 @@ A Client ID is configured but no client secret has been stored yet. Click the st
 
 ### Status bar shows `$(warning) EasyAuth: Entra issuer missing`
 
-Microsoft Entra ID's client ID and secret are configured, but the OIDC Issuer URL is not set. Click the status bar item to open the `easyauth.entra.oidcIssuerUrl` field in workspace settings. Enter a tenant-specific issuer URL, for example: `https://login.microsoftonline.com/<tenant-id>/v2.0`.
-
-### Emulator starts but one of my IdPs is not working
-
-The client secret may be missing for that IdP. Check the **EasyAuth Emulator** output channel for a warning such as:
-
-```text
-[extension] Warning: entra clientId is set but no client secret found
-```
-
-Run **EasyAuth Emulator: Set Client Secret** and select the affected provider.
+Microsoft Entra ID's client ID and secret are configured, but the OIDC Issuer URL is not set. Click the status bar item to open the `easyauth.entra.oidcIssuerUrl` field in workspace settings. Enter the Entra ID issuer URL, for example: `https://login.microsoftonline.com/<tenant-id | common | organizations | consumers>/v2.0`.
 
 ### Login fails — redirect URI mismatch (`AADSTS50011` or similar)
 

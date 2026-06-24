@@ -43,6 +43,7 @@ graph LR
 - `GET /.auth/login/<idp>`
   - 例\) `GET /.auth/login/aad`
 - `GET /.auth/logout`
+- `GET /.auth/refresh` _（互換性のためのダミー実装 — 認証済みは 200 OK、未認証は 401 を返す。トークン更新は行わない）_
 - `GET /.auth/login/select` _（エミュレーター独自実装 — Azure Easy Auth には存在しない）_
 
 上記以外の `/.auth/*` エンドポイントは 404 を返します。
@@ -179,7 +180,7 @@ OAUTH2_PROXY_REQUEST_LOGGING = true    # リクエストごとの HTTP ログ
 - Azure Easy Auth の完全一致実装ではありません。
 - ローカル開発および互換テスト用途を目的としています。
 - ヘッダー対応は部分実装（`X-MS-TOKEN-AAD-EXPIRES-ON`、`X-MS-TOKEN-AAD-REFRESH-TOKEN` は未実装）。
-- エンドポイント対応は部分実装（上記の `/.auth/*` エンドポイントのみ実装）。
+- エンドポイント対応は部分実装（上記の `/.auth/*` エンドポイントのみ実装）。`/.auth/refresh` はダミー実装であり、トークン更新は行いません（認証済み: 200、未認証: 401）。
 - `/.auth/logout` は本エミュレーターおよび oauth2-proxy のセッションを必ず先に終了します。IdP 側ブラウザー SSO の終了はベストエフォートです。
 - ログインフローにはエミュレーター固有仕様（`/.auth/login/select`、`DEFAULT_IDP`、`IDP_LIST` 1件時の既定化）が含まれます。
 - セッション制御は oauth2-proxy の cookie と本エミュレーターのルーティング規則に基づくため、マネージド Easy Auth の内部挙動とは差分が出る場合があります。

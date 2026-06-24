@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as path from 'path';
 
-type Framework = '.net' | 'java' | 'nodejs' | 'python' | 'unknown';
+type Framework = 'azure-functions' | '.net' | 'java' | 'nodejs' | 'python' | 'unknown';
 
 const FRAMEWORK_CACHE_KEY_PREFIX = 'easyauth.framework.';
 
@@ -14,6 +14,7 @@ const STDOUT_PATTERNS: RegExp[] = [
     /listening on.*?port\s+(\d+)/i,
     /Running on http:\/\/[^:]+:(\d+)/,
     /Uvicorn running on https?:\/\/[^:]+:(\d+)/,
+    /[Ll]istening on https?:\/\/[^:]+:(\d+)/,
 ];
 
 export class PortDetector {
@@ -178,7 +179,10 @@ export class PortDetector {
         let framework: Framework = 'unknown';
         try {
             const entries = fs.readdirSync(root);
-            if (entries.some(f => f.endsWith('.csproj')) || fs.existsSync(path.join(root, 'Properties', 'launchSettings.json'))) {
+            if (entries.includes('host.json')) {
+                // Azure Functions project: host.json at workspace root
+                framework = 'azure-functions';
+            } else if (entries.some(f => f.endsWith('.csproj')) || fs.existsSync(path.join(root, 'Properties', 'launchSettings.json'))) {
                 framework = '.net';
             } else if (fs.existsSync(path.join(root, 'pom.xml')) || fs.existsSync(path.join(root, 'build.gradle'))) {
                 framework = 'java';
@@ -203,6 +207,16 @@ export class PortDetector {
     private fromConfigFile(root: string, framework: Framework): number | null {
         try {
             switch (framework) {
+                case 'azure-functions': {
+                    const settingsPath = path.join(root, 'local.settings.json');
+                    if (fs.existsSync(settingsPath)) {
+                        const json = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as {
+                            Host?: { LocalHttpPort?: number };
+                        };
+                        if (typeof json.Host?.LocalHttpPort === 'number') return json.Host.LocalHttpPort;
+                    }
+                    return 7071; // Azure Functions Core Tools default port
+                }
                 case '.net': {
                     const p = path.join(root, 'Properties', 'launchSettings.json');
                     if (!fs.existsSync(p)) break;
