@@ -25,7 +25,7 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "extensionKind": [
     "workspace"
   ],
@@ -456,7 +456,11 @@
                 },
                 "codeChallengeMethod": {
                   "type": "string",
-                  "enum": ["S256", "plain", ""],
+                  "enum": [
+                    "S256",
+                    "plain",
+                    ""
+                  ],
                   "description": "IDP_<NAME>_CODE_CHALLENGE_METHOD: PKCE code challenge method. Set to 'S256' when the IdP supports it. Applies to oidc kind only."
                 },
                 "logoutEndpoint": {
@@ -703,19 +707,31 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "test": "vitest run",
+    "vscode:prepublish": "npm run package:ext",
+    "compile": "npm run check-types && node esbuild.js",
+    "compile:tests": "tsc -p ./",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch",
+    "package:ext": "npm run check-types && node esbuild.js --production",
+    "check-types": "tsc --noEmit",
+    "pretest": "npm run compile && npm run compile:tests",
+    "test": "vscode-test",
     "prepackage": "node -e \"const fs=require('fs'),src='../dist/easyauth-emulator',dst='bin/easyauth-emulator';if(fs.existsSync(dst))fs.rmSync(dst,{recursive:true,force:true});fs.cpSync(src,dst,{recursive:true})\"",
     "package": "node -e \"require('fs').copyFileSync('../LICENSE','LICENSE')\" && vsce package --target win32-x64 && node -e \"require('fs').unlinkSync('LICENSE')\"",
     "postpackage": "node -e \"require('fs').rmSync('bin/easyauth-emulator',{recursive:true,force:true})\""
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^24.0.0",
     "@types/vscode": "^1.88.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
-    "typescript": "^5.3.0",
-    "vitest": "^2.0.0"
+    "esbuild": "^0.28.1",
+    "glob": "^13.0.6",
+    "mocha": "^11.7.6",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.3.0"
   }
 }

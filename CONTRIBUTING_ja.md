@@ -179,6 +179,25 @@ npm install
 2. 「実行とデバッグ」パネルの構成ドロップダウンで **Debug Extension** を選択します。
 3. `F5` を押すと拡張機能開発ホストが起動します。
 
+### 拡張機能テストの実行
+
+**CLI から実行:**
+
+```powershell
+cd vscode-extension
+npm test
+```
+
+esbuild で拡張機能をバンドルし、`tsc` でテストファイルをコンパイルした後、VS Code Extension Host 上でテストを実行します。
+
+**F5 から実行:**
+
+`.vscode/launch.json` の `Extension Tests` 起動構成を使用すると、エミュレーターバイナリのビルド・拡張機能のバンドル・テストファイルのコンパイルを行ったうえで、VS Code Extension Host 内で Mocha テストスイートを実行します。
+
+1. VS Code でリポジトリルートを開きます。
+2. 「実行とデバッグ」パネルの構成ドロップダウンで **Extension Tests** を選択します。
+3. `F5` を押します。
+
 ### VSIX としてパッケージ化（開発確認用）
 
 VSIX にはエミュレーターバイナリが同梱されます。`--vsix` を使うと一括でビルドできます:

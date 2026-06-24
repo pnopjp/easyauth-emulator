@@ -16,8 +16,26 @@
         "--extensionDevelopmentPath=${workspaceFolder}/vscode-extension",
         "${env:EASYAUTH_EXTENSION_TEST_PROJECT_DIR}"
       ],
-      "outFiles": ["${workspaceFolder}/vscode-extension/out/**/*.js"],
+      "outFiles": [
+        "${workspaceFolder}/vscode-extension/dist/**/*.js",
+        "${workspaceFolder}/vscode-extension/out/**/*.js"
+      ],
       "preLaunchTask": "build: extension with binary"
+    },
+    {
+      "name": "Extension Tests",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-extension",
+        "--extensionTestsPath=${workspaceFolder}/vscode-extension/out/test/suite/index"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/vscode-extension/dist/**/*.js",
+        "${workspaceFolder}/vscode-extension/out/test/**/*.js"
+      ],
+      "preLaunchTask": "build: extension with tests"
     }
   ]
 }

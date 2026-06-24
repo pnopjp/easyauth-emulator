@@ -179,6 +179,25 @@ If the variable is not set, the Extension Development Host opens without a folde
 2. In the Run and Debug panel, select **Debug Extension** from the configuration dropdown.
 3. Press `F5` to launch the Extension Development Host.
 
+### Run Extension Tests
+
+**Via CLI:**
+
+```powershell
+cd vscode-extension
+npm test
+```
+
+Compiles the extension with esbuild and the test files with `tsc`, then runs all tests in a VS Code Extension Host instance.
+
+**Via F5:**
+
+The `Extension Tests` launch configuration (`.vscode/launch.json`) builds the emulator binary, bundles the extension, compiles the test files, and runs the Mocha test suite inside a VS Code Extension Host.
+
+1. Open the repository root in VS Code.
+2. In the Run and Debug panel, select **Extension Tests** from the configuration dropdown.
+3. Press `F5`.
+
 ### Package as VSIX (local verification only)
 
 The VSIX bundles the emulator binary. Use `--vsix` to build both in one step:

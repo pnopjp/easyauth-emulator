@@ -8,5 +8,3 @@ __pycache__/
 __*/
 .cert/
 ToDo.md
-!vscode-extension/tests/__mocks__/
-!vscode-extension/tests/__mocks__/**

@@ -43,6 +43,8 @@ The extension auto-detects your app's listening port from `launch.json`, framewo
 | Platform | Windows x64, macOS arm64, Linux x64 |
 
 > **macOS x64 (Intel) and Linux arm64** — Pre-built binaries are not bundled for these platforms. Run `python scripts/package.py --vsix` from the repo root to build both the binary and the `.vsix`, then install it via **Extensions: Install from VSIX**.
+>
+> **VS Code for Web (vscode.dev)** — This extension is not supported in browser-based VS Code environments (vscode.dev, GitHub Codespaces web editor). It requires native OS access to run the emulator binary.
 
 No additional runtime installation is needed — the emulator binary is bundled inside the extension.
 
