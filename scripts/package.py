@@ -64,6 +64,8 @@ def run_pyinstaller() -> None:
 
 def create_archive(platform_str: str) -> Path:
     out_stem = ROOT / "dist" / f"easyauth-emulator-{platform_str}"
+    license_src = ROOT / "LICENSE"
+    third_party_src = ROOT / "THIRD_PARTY_LICENSES"
 
     if platform_str.startswith("windows"):
         archive = out_stem.with_suffix(".zip")
@@ -72,11 +74,15 @@ def create_archive(platform_str: str) -> Path:
             for f in DIST_DIR.rglob("*"):
                 if f.is_file():
                     zf.write(f, Path("easyauth-emulator") / f.relative_to(DIST_DIR))
+            zf.write(license_src, Path("easyauth-emulator") / "LICENSE")
+            zf.write(third_party_src, Path("easyauth-emulator") / "THIRD_PARTY_LICENSES")
     else:
         archive = out_stem.with_suffix(".tar.gz")
         print(f"[package] Creating {archive.name} ...")
         with tarfile.open(archive, "w:gz", compresslevel=9) as tf:
             tf.add(DIST_DIR, arcname="easyauth-emulator")
+            tf.add(license_src, arcname="easyauth-emulator/LICENSE")
+            tf.add(third_party_src, arcname="easyauth-emulator/THIRD_PARTY_LICENSES")
 
     size_mb = archive.stat().st_size / 1_048_576
     print(f"[package] {archive.name}  ({size_mb:.1f} MB)")
@@ -89,12 +95,14 @@ def build_vsix(platform_str: str) -> None:
     vscode_target = _VSCODE_TARGET_MAP.get(platform_str)
     bin_dir = VSCODE_DIR / "bin" / "easyauth-emulator"
     license_dst = VSCODE_DIR / "LICENSE"
+    third_party_dst = VSCODE_DIR / "THIRD_PARTY_LICENSES"
 
     print("[vsix] Copying binary into vscode-extension/bin/ ...")
     if bin_dir.exists():
         shutil.rmtree(bin_dir)
     shutil.copytree(DIST_DIR, bin_dir)
     shutil.copy2(ROOT / "LICENSE", license_dst)
+    shutil.copy2(ROOT / "THIRD_PARTY_LICENSES", third_party_dst)
 
     try:
         node_modules = VSCODE_DIR / "node_modules"
@@ -115,6 +123,7 @@ def build_vsix(platform_str: str) -> None:
     finally:
         shutil.rmtree(bin_dir, ignore_errors=True)
         license_dst.unlink(missing_ok=True)
+        third_party_dst.unlink(missing_ok=True)
 
     print("[vsix] VSIX build complete.")
 
