@@ -231,6 +231,7 @@ jobs:
   publish:
     name: Publish
     needs: [test-unit, test-smoke]
+    if: always() && needs.test-unit.result == 'success' && needs.test-smoke.result == 'success'
     runs-on: ubuntu-latest
     environment: production
     permissions:
