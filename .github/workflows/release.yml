@@ -8,10 +8,63 @@ on:
 jobs:
 
   # ─────────────────────────────────────────────────────────────────────────
+  # License check — verify THIRD_PARTY_LICENSES is up to date
+  # If outdated, pause for human approval before proceeding
+  # ─────────────────────────────────────────────────────────────────────────
+  check-licenses:
+    name: Check licenses
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Check THIRD_PARTY_LICENSES
+        id: check
+        run: |
+          if .venv/bin/python scripts/gen_licenses.py --check; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Human approval gate — only runs when licenses have changed
+  # Requires approval from the "license-review" environment
+  # ─────────────────────────────────────────────────────────────────────────
+  approve-license-change:
+    name: Approve license change
+    needs: check-licenses
+    if: needs.check-licenses.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment: license-review
+
+    steps:
+      - name: License change detected
+        run: |
+          echo "THIRD_PARTY_LICENSES is out of date."
+          echo "Please review the license changes and approve to continue the release."
+
+  # ─────────────────────────────────────────────────────────────────────────
   # Build Python binary + package VSIX for each platform
   # ─────────────────────────────────────────────────────────────────────────
   build:
     name: Build (${{ matrix.platform }})
+    needs: [check-licenses, approve-license-change]
+    if: |
+      always() &&
+      needs.check-licenses.result == 'success' &&
+      (needs.approve-license-change.result == 'success' || needs.approve-license-change.result == 'skipped')
     strategy:
       fail-fast: false
       matrix:
@@ -35,11 +88,13 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller
-        run: pip install pyinstaller
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install pyinstaller -r requirements.txt
 
       - name: Build binary
-        run: python scripts/package.py
+        run: .venv/bin/python scripts/package.py
 
       - name: Upload binary archive
         uses: actions/upload-artifact@v7
@@ -74,8 +129,9 @@ jobs:
           rm -rf bin/easyauth-emulator
           cp -r ../dist/easyauth-emulator bin/easyauth-emulator
           cp ../LICENSE LICENSE
+          cp ../THIRD_PARTY_LICENSES THIRD_PARTY_LICENSES
           npx vsce package --target ${{ matrix.vscode_target }}
-          rm LICENSE
+          rm LICENSE THIRD_PARTY_LICENSES
           rm -rf bin/easyauth-emulator
 
       - name: Upload VSIX
