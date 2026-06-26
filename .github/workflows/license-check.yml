@@ -2,16 +2,35 @@ name: License Check
 
 on:
   pull_request:
-    paths:
-      - requirements.txt
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Detect whether requirements.txt changed in this PR
+  # ─────────────────────────────────────────────────────────────────────────
+  changes:
+    name: Detect requirements changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      requirements_changed: ${{ steps.filter.outputs.requirements }}
+
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            requirements:
+              - requirements.txt
+
   # ─────────────────────────────────────────────────────────────────────────
   # Post a comment on PRs that change requirements.txt
   # Includes a license summary table for changed packages
   # ─────────────────────────────────────────────────────────────────────────
   notify:
     name: Notify reviewers
+    needs: changes
+    if: needs.changes.outputs.requirements_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -115,6 +134,8 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   update-licenses:
     name: Update THIRD_PARTY_LICENSES
+    needs: changes
+    if: needs.changes.outputs.requirements_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -224,23 +245,35 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   check:
     name: THIRD_PARTY_LICENSES up to date
+    needs: [changes, update-licenses]
+    if: |
+      always() &&
+      needs.changes.result == 'success' &&
+      (needs.update-licenses.result == 'success' || needs.update-licenses.result == 'skipped')
     runs-on: ubuntu-latest
-    needs: update-licenses
 
     steps:
+      - name: No requirements change
+        if: needs.changes.outputs.requirements_changed != 'true'
+        run: echo "requirements.txt unchanged; skip license verification"
+
       - uses: actions/checkout@v6
+        if: needs.changes.outputs.requirements_changed == 'true'
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
       - uses: actions/setup-python@v6
+        if: needs.changes.outputs.requirements_changed == 'true'
         with:
           python-version: '3.12'
 
       - name: Install dependencies
+        if: needs.changes.outputs.requirements_changed == 'true'
         run: |
           python -m venv .venv
           .venv/bin/pip install -r requirements.txt
 
       - name: Check THIRD_PARTY_LICENSES
+        if: needs.changes.outputs.requirements_changed == 'true'
         run: .venv/bin/python scripts/gen_licenses.py --check
