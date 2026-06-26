@@ -243,7 +243,7 @@ THE SOFTWARE.
 
 
 ========================================================================
-certifi 2024.8.30
+certifi 2026.6.17
 License: MPL-2.0
 Homepage: https://github.com/certifi/python-certifi
 ========================================================================
@@ -271,14 +271,13 @@ one at http://mozilla.org/MPL/2.0/.
 
 
 ========================================================================
-charset-normalizer 3.4.0
+charset-normalizer 3.4.7
 License: MIT
-Homepage: https://github.com/Ousret/charset_normalizer
 ========================================================================
 
 MIT License
 
-Copyright (c) 2019 TAHRI Ahmed R.
+Copyright (c) 2025 TAHRI Ahmed R.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -300,7 +299,7 @@ SOFTWARE.
 
 
 ========================================================================
-cryptography 46.0.5
+cryptography 49.0.0
 License: Apache-2.0 OR BSD-3-Clause
 ========================================================================
 

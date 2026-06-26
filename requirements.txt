@@ -1,8 +1,8 @@
-bcrypt==5.0.0
-brotlicffi==1.2.0.1
-certifi==2024.8.30
-charset-normalizer==3.4.0
-cryptography==46.0.5
-h2==4.3.0
-truststore==0.10.4
-zstandard==0.25.0
+bcrypt
+brotlicffi
+certifi
+charset-normalizer
+cryptography
+h2
+truststore
+zstandard
