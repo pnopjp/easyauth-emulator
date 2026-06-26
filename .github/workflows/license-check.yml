@@ -75,9 +75,9 @@ jobs:
                   rows.append(f'| {pkg} | - | (not installed) |')
 
           if rows:
-              table = '| パッケージ | バージョン | ライセンス |\n| --- | --- | --- |\n' + '\n'.join(rows)
+              table = '| Package | Version | License |\n| --- | --- | --- |\n' + '\n'.join(rows)
           else:
-              table = '(変更なし)'
+              table = '(no changes)'
 
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'table<<EOF\n{table}\nEOF\n')
@@ -95,15 +95,15 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: [
-                '⚠️ **`requirements.txt` が変更されています。**',
+                '⚠️ **`requirements.txt` has been modified.**',
                 '',
-                '追加・更新されたパッケージのライセンス:',
+                'Licenses of added/updated packages:',
                 '',
                 table,
                 '',
-                '以下を確認してください：',
-                '1. ライセンスの種類に問題がないか（GPL/LGPL 等のコピーレフトが混入していないか）',
-                '2. `THIRD_PARTY_LICENSES` が正しく更新されているか',
+                'Please verify the following:',
+                '1. No problematic license types (e.g. GPL/LGPL copyleft) have been introduced',
+                '2. `THIRD_PARTY_LICENSES` has been updated correctly',
               ].join('\n')
             })
 
@@ -199,16 +199,16 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 body: [
-                  '⚠️ **`THIRD_PARTY_LICENSES` の更新が必要です。**',
+                  '⚠️ **`THIRD_PARTY_LICENSES` needs to be updated.**',
                   '',
-                  'ローカルで以下を実行してコミットしてください：',
+                  'Please run the following locally and commit the result:',
                   '```',
                   'python scripts/gen_licenses.py',
                   'git add THIRD_PARTY_LICENSES',
                   'git commit -m "chore: update THIRD_PARTY_LICENSES"',
                   '```',
                   '',
-                  '<details><summary>更新後のファイル内容</summary>',
+                  '<details><summary>Updated file content</summary>',
                   '',
                   '```',
                   content,

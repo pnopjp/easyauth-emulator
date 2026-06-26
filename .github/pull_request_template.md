@@ -1,7 +1,7 @@
-## 変更内容
+## Summary
 
-<!-- 変更の概要を記載してください -->
+<!-- Describe your changes -->
 
-## チェックリスト
+## Checklist
 
-- [ ] Pythonパッケージを追加・更新した場合、ライセンスを確認し `python scripts/gen_licenses.py` を実行して `THIRD_PARTY_LICENSES` を更新した
+- [ ] If Python packages were added or updated, verified licenses and ran `python scripts/gen_licenses.py` to update `THIRD_PARTY_LICENSES`
