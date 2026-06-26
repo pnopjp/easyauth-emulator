@@ -155,6 +155,7 @@ jobs:
   test-unit:
     name: Unit tests
     needs: build
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -188,6 +189,7 @@ jobs:
   test-smoke:
     name: Smoke test (${{ matrix.platform }})
     needs: build
+    if: always() && needs.build.result == 'success'
     strategy:
       fail-fast: false
       matrix:
