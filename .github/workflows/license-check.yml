@@ -66,6 +66,7 @@ jobs:
                   meta = importlib.metadata.metadata(pkg)
                   version = meta['Version']
                   lic = meta.get('License-Expression') or meta.get('License') or ''
+                  lic = lic.split('\n')[0].strip()
                   if not lic:
                       classifiers = meta.get_all('Classifier') or []
                       ids = [c.split(' :: ')[-1] for c in classifiers if c.startswith('License ::')]
