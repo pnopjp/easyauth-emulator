@@ -22,7 +22,7 @@ Easy Auth Emulator bridges that gap by providing an Azure authentication replace
 | **Standalone** ([binary from GitHub Releases](../../releases)) | CI / Docker / non-VS Code environments |
 | **VS Code Extension** | VS Code local development (auto-start/stop with debug sessions) |
 
-→ [Standalone setup](#setup) / [VS Code Extension](vscode-extension/README.md)
+→ [Standalone setup](#setup) / [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=pnop.easyauth-emulator)
 
 ## Typical Use Case
 
@@ -168,7 +168,7 @@ OAUTH2_PROXY_REQUEST_LOGGING = true    # per-request HTTP logs
 
 ## VS Code Extension
 
-A VS Code extension in `vscode-extension/` automatically starts and stops the emulator alongside your debug sessions. See [vscode-extension/README.md](vscode-extension/README.md) for installation and configuration details.
+A VS Code extension in `vscode-extension/` automatically starts and stops the emulator alongside your debug sessions. See the [VS Code Marketplace page](https://marketplace.visualstudio.com/items?itemName=pnop.easyauth-emulator) for installation and configuration details.
 
 ## Reference
 

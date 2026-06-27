@@ -1,0 +1,148 @@
+name: Release (extra platforms)
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+jobs:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Build Python binary + package VSIX for additional platforms
+  # ─────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.platform }})
+    if: github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            platform: darwin-amd64
+            vscode_target: darwin-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+            vscode_target: linux-arm64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # ── Python binary ──────────────────────────────────────────────────
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m venv .venv
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo "VENV_BIN=.venv/Scripts" >> "$GITHUB_ENV"
+            .venv/Scripts/pip install pyinstaller -r requirements.txt
+          else
+            echo "VENV_BIN=.venv/bin" >> "$GITHUB_ENV"
+            .venv/bin/pip install pyinstaller -r requirements.txt
+          fi
+
+      - name: Build binary
+        shell: bash
+        run: $VENV_BIN/python scripts/package.py
+
+      - name: Upload binary archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.platform }}
+          path: dist/easyauth-emulator-${{ matrix.platform }}.*
+          retention-days: 3
+
+      # ── VS Code extension (VSIX) ───────────────────────────────────────
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install npm dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Compile TypeScript
+        working-directory: vscode-extension
+        run: npm run compile
+
+      - name: Set extension version from tag
+        working-directory: vscode-extension
+        shell: bash
+        env:
+          TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "unexpected tag: $TAG"; exit 1 ;;
+          esac
+          npm version "${TAG#v}" --no-git-tag-version
+
+      - name: Package VSIX
+        working-directory: vscode-extension
+        shell: bash
+        run: |
+          mkdir -p bin
+          rm -rf bin/easyauth-emulator
+          cp -r ../dist/easyauth-emulator bin/easyauth-emulator
+          cp ../LICENSE LICENSE
+          cp ../THIRD_PARTY_LICENSES THIRD_PARTY_LICENSES
+          npx vsce package --target ${{ matrix.vscode_target }}
+          rm LICENSE THIRD_PARTY_LICENSES
+          rm -rf bin/easyauth-emulator
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v7
+        with:
+          name: vsix-${{ matrix.vscode_target }}
+          path: vscode-extension/*.vsix
+          retention-days: 3
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Publish — attach to existing GitHub Release + VS Code Marketplace
+  # ─────────────────────────────────────────────────────────────────────────
+  publish:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write   # required for OIDC token issuance
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts/
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@2bb465e97f322d3cb2a965294d483e0d26a67aa9  # v3.0.1
+        with:
+          tag_name: ${{ github.event.workflow_run.head_branch }}
+          files: |
+            artifacts/binary-darwin-amd64/*
+            artifacts/binary-linux-arm64/*
+            artifacts/vsix-darwin-x64/*
+            artifacts/vsix-linux-arm64/*
+
+      - name: Sign in to Azure (OIDC)
+        if: ${{ vars.AZURE_CLIENT_ID != '' }}
+        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a  # v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Publish to VS Code Marketplace
+        if: ${{ vars.AZURE_CLIENT_ID != '' }}
+        run: |
+          npm install -g @vscode/vsce
+          for vsix in artifacts/vsix-*/*.vsix; do
+            echo "Publishing $vsix ..."
+            vsce publish --packagePath "$vsix" --azure-credential
+          done
