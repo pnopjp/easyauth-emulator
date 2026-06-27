@@ -164,7 +164,7 @@ Available fields per entry:
 | `logoutEndpoint` | | Override the IdP logout URL |
 | `skipClaimsFromProfileUrl` | | `true` to skip fetching claims from the userinfo endpoint |
 | `extraArgs` | | Space-separated extra options passed to oauth2-proxy (e.g. `"--allowed-group=my-group --oidc-extra-audience=myapp"`) |
-| `icon` | | Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug (e.g. `"microsoft"`) or an image URL. Has no effect when `IDP_SELECT_ICONS` is `generic` or `text`. |
+| `icon` | | Icon shown on the IdP selection page. Specify a [Simple Icons](https://simpleicons.org) slug (e.g. `"auth0"`) or an image URL. Has no effect when `IDP_SELECT_ICONS` is `generic` or `text`. |
 
 ---
 

@@ -225,7 +225,7 @@ magick -background white vscode-extension/images/flow_ja.svg -resize 780x -flatt
 ```
 
 ---
-
+s
 ## アイコン素材
 
 アイコンのソースファイルは `assets/icon.svg` です。派生ファイルの再生成には [ImageMagick](https://imagemagick.org/) を使用します。コマンドはすべてリポジトリルートから実行してください。

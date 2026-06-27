@@ -447,7 +447,13 @@ _GITHUB_LATEST = "https://api.github.com/repos/oauth2-proxy/oauth2-proxy/release
 _GITHUB_TAG    = "https://api.github.com/repos/oauth2-proxy/oauth2-proxy/releases/tags/{tag}"
 _GITHUB_DOWNLOAD = "https://github.com/oauth2-proxy/oauth2-proxy/releases/download/{tag}/{asset_name}"
 _DEFAULT_OAUTH2_PROXY_VERSION = "v7.15.3"
-_OAUTH2_PROXY_CACHE_DIR = Path(os.environ.get("LOCALAPPDATA", str(RUNTIME_DIR))) / "easyauth-emulator" / "oauth2-proxy"
+if sys.platform == "win32":
+    _OAUTH2_PROXY_CACHE_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "easyauth-emulator" / "oauth2-proxy"
+elif sys.platform == "darwin":
+    _OAUTH2_PROXY_CACHE_DIR = Path.home() / "Library" / "Caches" / "easyauth-emulator" / "oauth2-proxy"
+else:
+    _xdg_cache = os.environ.get("XDG_CACHE_HOME", "")
+    _OAUTH2_PROXY_CACHE_DIR = (Path(_xdg_cache) if _xdg_cache else Path.home() / ".cache") / "easyauth-emulator" / "oauth2-proxy"
 
 _OS_MAP: dict[str, str] = {
     "win32":  "windows",

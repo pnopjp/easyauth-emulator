@@ -253,7 +253,7 @@ jobs:
           path: artifacts/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@2bb465e97f322d3cb2a965294d483e0d26a67aa9  # v3.0.1
         with:
           generate_release_notes: true
           files: |
@@ -266,7 +266,7 @@ jobs:
 
       - name: Sign in to Azure (OIDC)
         if: ${{ vars.AZURE_CLIENT_ID != '' }}
-        uses: azure/login@v2
+        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a  # v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
