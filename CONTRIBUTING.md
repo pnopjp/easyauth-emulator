@@ -68,7 +68,10 @@ VS Code's built-in **Simple Browser** does not work with OAuth2 flows — its We
 ### Command
 
 Use `scripts/package.py` to verify that your changes produce a working binary before pushing to CI.
-Runs PyInstaller and produces a local archive. Supports Windows (`.zip`), macOS, and Linux (`.tar.gz`) with `amd64` / `arm64` / `arm` architectures.
+Runs PyInstaller and produces a local archive. Supports Windows (`.zip`), macOS, and Linux (`.tar.gz`).
+
+- **Windows**: amd64 only. arm64 is not supported (oauth2-proxy does not distribute Windows ARM binaries).
+- **Cross-compilation**: not supported. Run this script on the OS and architecture you are targeting.
 
 ```powershell
 python scripts/package.py
@@ -161,6 +164,8 @@ IDP_ENTRA_SCOPES = openid profile email api://<client-id>/<scope-name>
 The `Debug Extension` launch configuration (`.vscode/launch.json`) opens an Extension Development Host with the extension loaded, and optionally opens a test App Service project in that host window.
 
 **Prerequisites:**
+
+Install npm dependencies (first time only):
 
 ```powershell
 cd vscode-extension

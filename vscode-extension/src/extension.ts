@@ -124,6 +124,11 @@ export function activate(context: vscode.ExtensionContext): void {
                     },
                 };
             },
+        }),
+        // Shell integration output (VS Code 1.93+): covers integratedTerminal where
+        // app output bypasses DAP output events.
+        vscode.window.onDidStartTerminalShellExecution(e => {
+            portDetector.onShellExecution(e.execution);
         })
     );
 
