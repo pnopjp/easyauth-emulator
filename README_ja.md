@@ -93,12 +93,9 @@ docs/
 | --- | --- |
 | Windows x64 | `easyauth-emulator-<version>-windows-amd64.zip` |
 | macOS（Apple Silicon） | `easyauth-emulator-<version>-darwin-arm64.tar.gz` |
-| macOS（Intel） | `easyauth-emulator-<version>-darwin-amd64.tar.gz` |
 | Linux x64 | `easyauth-emulator-<version>-linux-amd64.tar.gz` |
 | Linux arm64 | `easyauth-emulator-<version>-linux-arm64.tar.gz` |
 
-> プラットフォームによりリリースのタイミングがずれる場合があります。特に **macOS（Intel）** はビルド環境の制約により、他のプラットフォームより公開が大幅に遅れる場合があります。
->
 > **Windows arm64** — 非対応です。oauth2-proxy が Windows ARM 向けバイナリを配布していないため、サポートできません。
 
 ### 2. config.toml を設定する
