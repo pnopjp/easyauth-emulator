@@ -92,10 +92,14 @@ Download the archive for your platform from [GitHub Releases](../../releases) an
 | Platform | File |
 | --- | --- |
 | Windows x64 | `easyauth-emulator-<version>-windows-amd64.zip` |
-| macOS arm64 | `easyauth-emulator-<version>-darwin-arm64.tar.gz` |
+| macOS (Apple Silicon) | `easyauth-emulator-<version>-darwin-arm64.tar.gz` |
+| macOS (Intel) | `easyauth-emulator-<version>-darwin-amd64.tar.gz` |
 | Linux x64 | `easyauth-emulator-<version>-linux-amd64.tar.gz` |
+| Linux arm64 | `easyauth-emulator-<version>-linux-arm64.tar.gz` |
 
-> **macOS x64 (Intel) and Linux arm64** — Pre-built binaries are not provided for these platforms. To use on them, clone the repository and run `python scripts/package.py` to build from source.
+> Release timing may vary by platform. **macOS (Intel)** in particular may be published significantly later than other platforms due to build environment constraints.
+>
+> **Windows arm64** — Not supported. oauth2-proxy does not distribute Windows ARM binaries.
 
 ### 2. Configure config.toml
 

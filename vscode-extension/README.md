@@ -40,9 +40,11 @@ The extension auto-detects your app's listening port from `launch.json`, framewo
 | Requirement | Details |
 | --- | --- |
 | VS Code | 1.88 or later |
-| Platform | Windows x64, macOS arm64, Linux x64 |
+| Platform | Windows x64, macOS (Apple Silicon), macOS (Intel), Linux x64, Linux arm64 |
 
-> **macOS x64 (Intel) and Linux arm64** — Pre-built binaries are not bundled for these platforms. Run `python scripts/package.py --vsix` from the repo root to build both the binary and the `.vsix`, then install it via **Extensions: Install from VSIX**.
+> Release timing may vary by platform. The **macOS (Intel)** `.vsix` in particular may be published significantly later than other platforms due to build environment constraints. If the pre-built `.vsix` for your platform is not yet available, you can build from source: run `python scripts/package.py --vsix` from the repo root, then install the generated `.vsix` via **Extensions: Install from VSIX**.
+>
+> **Windows arm64** — Not supported. oauth2-proxy does not distribute Windows ARM binaries.
 >
 > **VS Code for Web (vscode.dev)** — This extension is not supported in browser-based VS Code environments (vscode.dev, GitHub Codespaces web editor). It requires native OS access to run the emulator binary.
 
