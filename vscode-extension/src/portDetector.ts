@@ -27,6 +27,21 @@ export class PortDetector {
         this.outputChannel.appendLine(message);
     }
 
+    /** Called for every terminal shell execution (VS Code 1.93+). */
+    onShellExecution(execution: vscode.TerminalShellExecution): void {
+        void (async () => {
+            for await (const data of execution.read()) {
+                const port = this.extractPortFromText(data);
+                if (port !== null && this.stdoutPort === null) {
+                    this.stdoutPort = port;
+                    const waiters = this.portWaiters.splice(0);
+                    for (const resolve of waiters) resolve(port);
+                    return;
+                }
+            }
+        })();
+    }
+
     /** Called by the DebugAdapterTracker for every output event. */
     onDebugOutput(text: string): void {
         const port = this.extractPortFromText(text);
