@@ -88,18 +88,19 @@ export class PortDetector {
                 return candidates[0];
             }
             if (candidates.length > 1) return this.pickFromList(candidates);
-        } else if (framework === 'python') {
-            // For Python projects, scan well-known default ports when no portScanBase is set.
-            // This covers the common case where Flask output is routed to the integrated terminal
-            // (the debugpy default on Linux) and cannot be intercepted via DAP output events.
-            const pythonDefaults = [5000, 8000, 8080, 3000];
-            this.log(`[portDetector] Step 5: scanning Python default ports ${pythonDefaults.join(', ')}`);
+        } else {
+            // When no portScanBase is configured, scan well-known default ports used across
+            // common frameworks (Flask:5000, Django/uvicorn:8000, Spring Boot/general:8080,
+            // Express/Next.js:3000). Exclude the emulator's own port to avoid self-detection.
+            const emulatorPort = config.get<number>('site.port', 8080);
+            const wellKnown = [3000, 5000, 7071, 8000, 8080].filter(p => p !== emulatorPort);
+            this.log(`[portDetector] Step 5: scanning well-known ports ${wellKnown.join(', ')} (excluding emulator port ${emulatorPort})`);
             const candidates: number[] = [];
-            for (const p of pythonDefaults) {
+            for (const p of wellKnown) {
                 if (await this.isListening(p)) candidates.push(p);
             }
             if (candidates.length === 1) {
-                this.log(`[portDetector] Step 5: found Python default port ${candidates[0]}`);
+                this.log(`[portDetector] Step 5: found port ${candidates[0]}`);
                 return candidates[0];
             }
             if (candidates.length > 1) return this.pickFromList(candidates);
