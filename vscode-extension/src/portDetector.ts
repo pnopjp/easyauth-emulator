@@ -88,6 +88,21 @@ export class PortDetector {
                 return candidates[0];
             }
             if (candidates.length > 1) return this.pickFromList(candidates);
+        } else if (framework === 'python') {
+            // For Python projects, scan well-known default ports when no portScanBase is set.
+            // This covers the common case where Flask output is routed to the integrated terminal
+            // (the debugpy default on Linux) and cannot be intercepted via DAP output events.
+            const pythonDefaults = [5000, 8000, 8080, 3000];
+            this.log(`[portDetector] Step 5: scanning Python default ports ${pythonDefaults.join(', ')}`);
+            const candidates: number[] = [];
+            for (const p of pythonDefaults) {
+                if (await this.isListening(p)) candidates.push(p);
+            }
+            if (candidates.length === 1) {
+                this.log(`[portDetector] Step 5: found Python default port ${candidates[0]}`);
+                return candidates[0];
+            }
+            if (candidates.length > 1) return this.pickFromList(candidates);
         }
 
         // Step 6: manual input
@@ -142,6 +157,13 @@ export class PortDetector {
             if (!isNaN(n)) return n;
         }
 
+        // Flask-specific env vars
+        const flaskPort = env['FLASK_RUN_PORT'] ?? env['FLASK_PORT'];
+        if (flaskPort) {
+            const n = parseInt(flaskPort, 10);
+            if (!isNaN(n)) return n;
+        }
+
         if (env['ASPNETCORE_URLS']) {
             const p = this.portFromUrlList(env['ASPNETCORE_URLS']);
             if (p !== null) return p;
@@ -154,6 +176,21 @@ export class PortDetector {
             const p = this.portFromUrlList(cfg['applicationUrl']);
             if (p !== null) return p;
         }
+
+        // --port / -p / --bind argument in args array (Flask, uvicorn, gunicorn, etc.)
+        const args = Array.isArray(cfg['args']) ? (cfg['args'] as unknown[]).map(String) : [];
+        for (let i = 0; i < args.length - 1; i++) {
+            if (args[i] === '--port' || args[i] === '-p' || args[i] === '--bind') {
+                // --bind may be "0.0.0.0:8000"
+                const raw = args[i + 1];
+                const m = raw.match(/:?(\d+)$/);
+                if (m) {
+                    const n = parseInt(m[1], 10);
+                    if (!isNaN(n)) return n;
+                }
+            }
+        }
+
         return null;
     }
 
@@ -248,7 +285,9 @@ export class PortDetector {
                 case 'python': {
                     const envPath = path.join(root, '.env');
                     if (fs.existsSync(envPath)) {
-                        const m = fs.readFileSync(envPath, 'utf-8').match(/^PORT\s*=\s*(\d+)/m);
+                        const content = fs.readFileSync(envPath, 'utf-8');
+                        // Match PORT, FLASK_RUN_PORT, or FLASK_PORT (Flask-specific)
+                        const m = content.match(/^(?:FLASK_RUN_PORT|FLASK_PORT|PORT)\s*=\s*(\d+)/m);
                         if (m) return parseInt(m[1], 10);
                     }
                     break;
