@@ -78,6 +78,9 @@ jobs:
           - os: ubuntu-latest
             platform: linux-amd64
             vscode_target: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+            vscode_target: linux-arm64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -204,6 +207,8 @@ jobs:
             platform: darwin-arm64
           - os: ubuntu-latest
             platform: linux-amd64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -260,9 +265,11 @@ jobs:
             artifacts/binary-windows-amd64/*
             artifacts/binary-darwin-arm64/*
             artifacts/binary-linux-amd64/*
+            artifacts/binary-linux-arm64/*
             artifacts/vsix-win32-x64/*
             artifacts/vsix-darwin-arm64/*
             artifacts/vsix-linux-x64/*
+            artifacts/vsix-linux-arm64/*
 
       - name: Sign in to Azure (OIDC)
         if: ${{ vars.AZURE_CLIENT_ID != '' }}

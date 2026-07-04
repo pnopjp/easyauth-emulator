@@ -1,7 +1,7 @@
 {
   "name": "easyauth-emulator",
   "displayName": "EasyAuth Emulator",
-  "description": "Integrates EasyAuth Emulator with VS Code debug sessions — auto-starts and stops the proxy as you debug.",
+  "description": "Emulate Azure App Service / Functions / Container Apps Easy Auth locally. Auto-starts an auth proxy during VS Code debug sessions — no Azure deployment needed.",
   "version": "0.0.0",
   "publisher": "pnop",
   "repository": {
@@ -12,15 +12,24 @@
     "vscode": "^1.93.0"
   },
   "categories": [
-    "Other"
+    "Azure",
+    "Debuggers"
   ],
   "icon": "images/icon.png",
   "keywords": [
     "easyauth",
+    "easy auth",
     "azure",
+    "azure app service",
+    "azure web apps",
+    "azure container apps",
+    "azure functions",
     "authentication",
     "proxy",
-    "debug"
+    "debug",
+    "local development",
+    "entra",
+    "oauth"
   ],
   "activationEvents": [
     "onStartupFinished"
