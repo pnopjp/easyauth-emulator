@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { StatusBarManager, EmulatorState } from './statusBar';
 import { SecretManager } from './secretManager';
+import { checkPortForwarding, forwardingCheckApplies, getSiteOrigin } from './portForwarding';
 
 const STARTUP_TIMEOUT_MS = 30_000;
 const STARTED_MARKER = 'All processes started';
@@ -105,6 +106,7 @@ export class EmulatorManager implements vscode.Disposable {
                     if (this.state === 'starting' && line.includes(STARTED_MARKER)) {
                         this.clearStartTimeout();
                         this.setState('running');
+                        void this.verifyPortForwarding();
                     }
                 }
             });
@@ -206,6 +208,46 @@ export class EmulatorManager implements vscode.Disposable {
         const listenPort = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
         this.statusBar.update(state, listenPort, this.currentPort);
         this._onDidChangeState.fire(state);
+    }
+
+    /**
+     * In a remote session, new OAuth logins only work when VS Code forwards
+     * site.port to the same local port on the client (the IdP redirects the
+     * browser to http://localhost:<site.port>). If the client picked a
+     * different port, fail fast instead of leaving a half-working emulator.
+     */
+    private async verifyPortForwarding(): Promise<void> {
+        if (!forwardingCheckApplies()) return;
+        const sitePort = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
+        let check;
+        try {
+            check = await checkPortForwarding(sitePort);
+        } catch (err) {
+            this.outputChannel.warn(`[extension] Port forwarding check failed: ${err}`);
+            return;
+        }
+        // State may have changed while awaiting (e.g. stopped by the user)
+        if (check.matches || this.state !== 'running') return;
+
+        const { scheme, host } = getSiteOrigin();
+        this.outputChannelError(
+            `[extension] Error: local port ${sitePort} is already in use on the client machine — ` +
+            `VS Code forwarded the emulator to local port ${check.externalPort} instead. ` +
+            `OAuth callbacks target ${scheme}://${host}:${sitePort} and would not reach the emulator, ` +
+            `so it has been stopped. Free local port ${sitePort} (or change easyauth.site.port) and start again.`
+        );
+        await this.stop();
+        this.setState('error');
+        void vscode.window.showErrorMessage(
+            `EasyAuth: local port ${sitePort} is in use on this machine, so VS Code forwarded the emulator ` +
+            `to a different local port (${check.externalPort}). OAuth login would fail — the emulator has been stopped. ` +
+            `Free local port ${sitePort} or change easyauth.site.port.`,
+            'Open Output'
+        ).then((sel) => {
+            if (sel === 'Open Output') {
+                this.outputChannel.show();
+            }
+        });
     }
 
     private clearStartTimeout(): void {

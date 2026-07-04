@@ -5,6 +5,7 @@ import { PortDetector } from './portDetector';
 import { StatusBarManager } from './statusBar';
 import { SecretManager } from './secretManager';
 import { EmulatorTreeProvider, IdpInfo, IdpTreeItem } from './emulatorTreeProvider';
+import { checkPortForwarding, forwardingCheckApplies, getSiteOrigin } from './portForwarding';
 
 const BUILTIN_IDP_LABELS: Record<string, string> = {
     entra: 'Microsoft Entra ID',
@@ -230,9 +231,11 @@ export function activate(context: vscode.ExtensionContext): void {
             });
             return;
         }
-        // Guard the URL itself: only localhost http/https with a safe path is acceptable.
-        // This prevents shell metacharacters from reaching cmd.exe via a malformed URL.
-        if (!/^https?:\/\/localhost:\d{1,5}(\/[A-Za-z0-9._/-]*)?$/.test(url)) {
+        // Guard the URL itself: only http/https with a plain hostname (letters,
+        // digits, dots, hyphens, or a bracketed IPv6 literal) and a safe path is
+        // acceptable. This prevents shell metacharacters from reaching cmd.exe
+        // via a malformed URL.
+        if (!/^https?:\/\/(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9.-]+):\d{1,5}(\/[A-Za-z0-9._/-]*)?$/.test(url)) {
             outputChannel.error(`[extension] Private browser launch blocked: unsafe URL: ${url}`);
             void vscode.window.showErrorMessage('EasyAuth: Internal error: unsafe URL rejected.');
             return;
@@ -283,7 +286,8 @@ export function activate(context: vscode.ExtensionContext): void {
                 void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
                 return;
             }
-            launchInPrivateBrowser(`http://localhost:${port}`);
+            const { scheme, host } = getSiteOrigin();
+            launchInPrivateBrowser(`${scheme}://${host}:${port}`);
         })
     );
 
@@ -322,14 +326,46 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('easyauth.idp.openInBrowser', (item: IdpTreeItem) => {
-            const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
-            if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
-                void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
+    // Opens the gateway in the client's browser, preserving the scheme and
+    // host configured in site.url (https, test.localhost, 127.0.0.1, [::1], …)
+    // — cookies and TLS certificates are bound to that origin, and loopback
+    // hosts resolve to the forwarded tunnel on the client anyway. In a remote
+    // session, refuse with an error when VS Code forwarded site.port to a
+    // different local port — new OAuth logins would fail there (the IdP
+    // redirects the browser to <site.url>:<site.port>, which no longer
+    // reaches the gateway).
+    async function openGatewayInBrowser(urlPath: string): Promise<void> {
+        const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
+        if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+            void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
+            return;
+        }
+        const { scheme, host } = getSiteOrigin();
+        const targetUri = vscode.Uri.parse(`${scheme}://${host}:${port}${urlPath}`);
+        if (!forwardingCheckApplies()) {
+            void vscode.env.openExternal(targetUri);
+            return;
+        }
+        try {
+            const check = await checkPortForwarding(port);
+            if (!check.matches) {
+                void vscode.window.showErrorMessage(
+                    `EasyAuth: local port ${port} is in use on this machine, so VS Code forwarded the emulator ` +
+                    `to a different local port (${check.externalPort}). OAuth login would fail there. ` +
+                    `Free local port ${port} or change easyauth.site.port.`
+                );
                 return;
             }
-            void vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${port}/.auth/login/${item.idpKey}`));
+            void vscode.env.openExternal(targetUri);
+        } catch (err) {
+            outputChannel.warn(`[extension] Port forwarding check failed: ${err}`);
+            void vscode.env.openExternal(targetUri);
+        }
+    }
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('easyauth.idp.openInBrowser', async (item: IdpTreeItem) => {
+            await openGatewayInBrowser(`/.auth/login/${item.idpKey}`);
         })
     );
 
@@ -340,18 +376,14 @@ export function activate(context: vscode.ExtensionContext): void {
                 void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
                 return;
             }
-            launchInPrivateBrowser(`http://localhost:${port}/.auth/login/${item.idpKey}`);
+            const { scheme, host } = getSiteOrigin();
+            launchInPrivateBrowser(`${scheme}://${host}:${port}/.auth/login/${item.idpKey}`);
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('easyauth.openInBrowser', () => {
-            const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
-            if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
-                void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
-                return;
-            }
-            void vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${port}`));
+        vscode.commands.registerCommand('easyauth.openInBrowser', async () => {
+            await openGatewayInBrowser('');
         })
     );
 
