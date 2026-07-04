@@ -1,12 +1,10 @@
 import * as vscode from 'vscode';
 
 export interface ForwardingCheck {
-    /** Client-side URI returned by asExternalUri (host may differ from site.url). */
-    externalUri: vscode.Uri;
-    /** Local port the client actually forwards to the remote gateway. */
-    externalPort: number;
-    /** True when the forwarded local port equals site.port. */
+    /** True when the gateway port forwards to the same local port on the client. */
     matches: boolean;
+    /** Local port that actually forwards to the gateway (null if undeterminable). */
+    localPort: number | null;
 }
 
 export interface SiteOrigin {
@@ -49,19 +47,27 @@ export function forwardingCheckApplies(): boolean {
 }
 
 /**
- * Establish port forwarding for the gateway and report whether VS Code
- * forwarded it on the same local port. In a remote session VS Code picks a
- * different local port when site.port is already taken on the client — the
- * IdP then redirects new logins to <site.url>:<site.port>, which no longer
- * reaches the gateway. The probe always uses http://localhost because that
- * form is guaranteed to be recognized by asExternalUri; the tunnel is plain
- * TCP, so the gateway's actual scheme and loopback hostname do not matter.
+ * Verify that the gateway port forwards to the same local port on the client
+ * — new OAuth logins only work then (the IdP redirects the browser to
+ * <site.url>:<site.port>).
+ *
+ * asExternalUri reuses an already-registered forward for the port, so a
+ * mismatch has two possible causes the API cannot distinguish:
+ * - a stale Ports-panel entry mapping the gateway port to another local port
+ *   (left over from an earlier attempt when the local port really was busy),
+ * - the local port is genuinely unavailable on the client (in use — or on
+ *   Windows reserved by Hyper-V/WSL even when netstat shows it free),
+ * so error messages must offer both remedies. The probe uses http://localhost
+ * because that form is guaranteed to be recognized by asExternalUri; the
+ * tunnel is plain TCP, so the gateway's actual scheme and loopback hostname
+ * do not matter. The forwarding it establishes is intentionally left open
+ * for the browser.
  */
 export async function checkPortForwarding(sitePort: number): Promise<ForwardingCheck> {
     const externalUri = await vscode.env.asExternalUri(
         vscode.Uri.parse(`http://localhost:${sitePort}`)
     );
     const m = /:(\d+)$/.exec(externalUri.authority);
-    const externalPort = m ? Number(m[1]) : (externalUri.scheme === 'https' ? 443 : 80);
-    return { externalUri, externalPort, matches: externalPort === sitePort };
+    const localPort = m ? Number(m[1]) : null;
+    return { matches: localPort === sitePort, localPort };
 }

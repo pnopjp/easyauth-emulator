@@ -231,17 +231,21 @@ export class EmulatorManager implements vscode.Disposable {
 
         const { scheme, host } = getSiteOrigin();
         this.outputChannelError(
-            `[extension] Error: local port ${sitePort} is already in use on the client machine — ` +
-            `VS Code forwarded the emulator to local port ${check.externalPort} instead. ` +
-            `OAuth callbacks target ${scheme}://${host}:${sitePort} and would not reach the emulator, ` +
-            `so it has been stopped. Free local port ${sitePort} (or change easyauth.site.port) and start again.`
+            `[extension] Error: remote port ${sitePort} forwards to local port ${check.localPort} on the client ` +
+            `machine, but OAuth callbacks target ${scheme}://${host}:${sitePort} and would not reach the emulator — ` +
+            `it has been stopped. Likely causes, in order: ` +
+            `(1) the Ports panel already has an entry mapping port ${sitePort} to local port ${check.localPort} ` +
+            `(left over from an earlier attempt) — remove it or change its local address back to ${sitePort}; ` +
+            `(2) local port ${sitePort} is in use on the client machine — free it or change easyauth.site.port. ` +
+            `Note: on a Windows client a port can also be reserved by Hyper-V/WSL even when it looks free ` +
+            `(check with: netsh interface ipv4 show excludedportrange protocol=tcp). Then start again.`
         );
         await this.stop();
         this.setState('error');
         void vscode.window.showErrorMessage(
-            `EasyAuth: local port ${sitePort} is in use on this machine, so VS Code forwarded the emulator ` +
-            `to a different local port (${check.externalPort}). OAuth login would fail — the emulator has been stopped. ` +
-            `Free local port ${sitePort} or change easyauth.site.port.`,
+            `EasyAuth: port ${sitePort} forwards to a different local port (${check.localPort}) on this machine, ` +
+            `so OAuth login would fail — the emulator has been stopped. Check the Ports panel for a stale ` +
+            `forwarded-port entry, or free local port ${sitePort}.`,
             'Open Output'
         ).then((sel) => {
             if (sel === 'Open Output') {
