@@ -1,11 +1,19 @@
 import * as vscode from 'vscode';
 
-export interface ForwardingCheck {
-    /** True when the gateway port forwards to the same local port on the client. */
-    matches: boolean;
-    /** Local port that actually forwards to the gateway (null if undeterminable). */
-    localPort: number | null;
-}
+export type ForwardingCheck =
+    /** localhost:<site.port> on the client reaches the gateway — all good. */
+    | { kind: 'match'; localPort: number }
+    /** The gateway port forwards to a DIFFERENT local port — new OAuth logins break. */
+    | { kind: 'mismatch'; localPort: number }
+    /**
+     * The client exposes the gateway through a forwarded domain URL instead of
+     * localhost (Remote - Tunnels / Codespaces web style, e.g.
+     * https://xxx-8080.devtunnels.ms). The site is reachable there, but OAuth
+     * callbacks (SITE_URL = localhost) do not go through that domain.
+     */
+    | { kind: 'external-domain'; externalUri: vscode.Uri }
+    /** The returned URI could not be interpreted — do not act on it. */
+    | { kind: 'unknown'; externalUri: vscode.Uri };
 
 export interface SiteOrigin {
     /** 'http' or 'https'. */
@@ -47,12 +55,12 @@ export function forwardingCheckApplies(): boolean {
 }
 
 /**
- * Verify that the gateway port forwards to the same local port on the client
- * — new OAuth logins only work then (the IdP redirects the browser to
- * <site.url>:<site.port>).
+ * Resolve how the client reaches the gateway port and classify the result —
+ * new OAuth logins only work when it is localhost on the same port (the IdP
+ * redirects the browser to <site.url>:<site.port>).
  *
  * asExternalUri reuses an already-registered forward for the port, so a
- * mismatch has two possible causes the API cannot distinguish:
+ * 'mismatch' has two possible causes the API cannot distinguish:
  * - a stale Ports-panel entry mapping the gateway port to another local port
  *   (left over from an earlier attempt when the local port really was busy),
  * - the local port is genuinely unavailable on the client (in use — or on
@@ -60,14 +68,25 @@ export function forwardingCheckApplies(): boolean {
  * so error messages must offer both remedies. The probe uses http://localhost
  * because that form is guaranteed to be recognized by asExternalUri; the
  * tunnel is plain TCP, so the gateway's actual scheme and loopback hostname
- * do not matter. The forwarding it establishes is intentionally left open
- * for the browser.
+ * do not matter. A forwarding it establishes is intentionally left open for
+ * the browser.
  */
 export async function checkPortForwarding(sitePort: number): Promise<ForwardingCheck> {
     const externalUri = await vscode.env.asExternalUri(
         vscode.Uri.parse(`http://localhost:${sitePort}`)
     );
-    const m = /:(\d+)$/.exec(externalUri.authority);
-    const localPort = m ? Number(m[1]) : null;
-    return { matches: localPort === sitePort, localPort };
+    const authority = externalUri.authority;
+    if (!authority) {
+        return { kind: 'unknown', externalUri };
+    }
+    const host = authority.replace(/:(\d+)$/, '');
+    if (!isLoopbackHost(host)) {
+        // e.g. Remote - Tunnels returning https://xxx-8080.devtunnels.ms/
+        return { kind: 'external-domain', externalUri };
+    }
+    const m = /:(\d+)$/.exec(authority);
+    const localPort = m ? Number(m[1]) : (externalUri.scheme === 'https' ? 443 : 80);
+    return localPort === sitePort
+        ? { kind: 'match', localPort }
+        : { kind: 'mismatch', localPort };
 }

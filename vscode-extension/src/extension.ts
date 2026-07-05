@@ -139,6 +139,11 @@ export function activate(context: vscode.ExtensionContext): void {
             const config = vscode.workspace.getConfiguration('easyauth');
             if (!config.get<boolean>('autoStart', true)) return;
             if (!emulator.hasConfig()) return;
+            // Ignore child sessions (e.g. debugpy spawns one per Flask
+            // reloader subprocess) — they belong to the same debug run and
+            // would double-start the emulator when the parent's instance has
+            // already stopped (e.g. after a failed port forwarding check).
+            if (session.parentSession) return;
             // Only attach to the first session; ignore subsequent ones
             if (emulator.isManaging()) return;
 
@@ -348,16 +353,35 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         try {
             const check = await checkPortForwarding(port);
-            if (!check.matches) {
-                void vscode.window.showErrorMessage(
-                    `EasyAuth: cannot open the browser — port ${port} is forwarded to a different local port ` +
-                    `(${check.localPort}), so OAuth login would fail. Fix: 1) In the PORTS panel, stop forwarding ` +
-                    `port ${port}. 2) Quit the app using port ${port} on your PC, or change the easyauth.site.port ` +
-                    `setting. Then try again.`
-                );
-                return;
+            switch (check.kind) {
+                case 'match':
+                    void vscode.env.openExternal(targetUri);
+                    return;
+                case 'mismatch':
+                    void vscode.window.showErrorMessage(
+                        `EasyAuth: cannot open the browser — port ${port} is forwarded to a different local port ` +
+                        `(${check.localPort}), so OAuth login would fail. Fix: 1) In the PORTS panel, stop forwarding ` +
+                        `port ${port}. 2) Quit the app using port ${port} on your PC, or change the easyauth.site.port ` +
+                        `setting. Then try again.`
+                    );
+                    return;
+                case 'external-domain': {
+                    // Open the forwarded URL — the site works there, only sign-in does not.
+                    const externalUri = check.externalUri.with({
+                        path: check.externalUri.path.replace(/\/$/, '') + urlPath,
+                    });
+                    void vscode.window.showWarningMessage(
+                        `EasyAuth: opening the forwarded URL ${check.externalUri.toString(true)} — OAuth sign-in through ` +
+                        `it is not supported yet. To sign in, forward port ${port} in the PORTS panel and open ` +
+                        `http://localhost:${port} on your PC.`
+                    );
+                    void vscode.env.openExternal(externalUri);
+                    return;
+                }
+                case 'unknown':
+                    void vscode.env.openExternal(targetUri);
+                    return;
             }
-            void vscode.env.openExternal(targetUri);
         } catch (err) {
             outputChannel.warn(`[extension] Port forwarding check failed: ${err}`);
             void vscode.env.openExternal(targetUri);

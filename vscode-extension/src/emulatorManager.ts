@@ -213,8 +213,11 @@ export class EmulatorManager implements vscode.Disposable {
     /**
      * In a remote session, new OAuth logins only work when VS Code forwards
      * site.port to the same local port on the client (the IdP redirects the
-     * browser to http://localhost:<site.port>). If the client picked a
-     * different port, fail fast instead of leaving a half-working emulator.
+     * browser to http://localhost:<site.port>). Only the confirmed-broken case
+     * (a loopback forward on a different port) stops the emulator; forwarded
+     * domain URLs (Remote - Tunnels / Codespaces web) and unrecognized results
+     * are logged as warnings instead so unknown environments are not killed
+     * by a false positive.
      */
     private async verifyPortForwarding(): Promise<void> {
         if (!forwardingCheckApplies()) return;
@@ -227,7 +230,32 @@ export class EmulatorManager implements vscode.Disposable {
             return;
         }
         // State may have changed while awaiting (e.g. stopped by the user)
-        if (check.matches || this.state !== 'running') return;
+        if (this.state !== 'running') return;
+
+        switch (check.kind) {
+            case 'match':
+                this.outputChannel.info(
+                    `[extension] Port forwarding OK: http://localhost:${sitePort} on your PC reaches the emulator.`
+                );
+                return;
+            case 'external-domain':
+                this.outputChannel.warn(
+                    `[extension] This environment exposes the emulator through a forwarded URL: ${check.externalUri.toString(true)}\n` +
+                    `The site is reachable there, but OAuth sign-in through that URL is not supported yet ` +
+                    `(login callbacks go to http://localhost:${sitePort}).\n` +
+                    `To sign in: open the PORTS panel (bottom panel, next to TERMINAL), forward port ${sitePort}, ` +
+                    `and open http://localhost:${sitePort} on your PC.`
+                );
+                return;
+            case 'unknown':
+                this.outputChannel.warn(
+                    `[extension] Could not interpret the forwarded address for port ${sitePort}: ` +
+                    `${check.externalUri.toString(true)} — skipping the port forwarding check.`
+                );
+                return;
+            case 'mismatch':
+                break;
+        }
 
         const { scheme, host } = getSiteOrigin();
         this.outputChannelError(
