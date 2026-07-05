@@ -250,7 +250,7 @@ export class EmulatorManager implements vscode.Disposable {
                 return;
             case 'external-domain': {
                 const origin = `${check.externalUri.scheme}://${check.externalUri.authority}`;
-                this.outputChannel.warn(
+                this.outputChannel.info(
                     `[extension] This environment exposes the emulator through a forwarded URL: ${origin}\n` +
                     `To sign in there, add ${origin}/oauth2/callback to your IdP app registration's redirect URIs.\n` +
                     `Note: http://localhost:${sitePort} on your PC is NOT forwarded in this environment (unlike Remote - SSH).`

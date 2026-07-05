@@ -384,7 +384,7 @@ export function activate(context: vscode.ExtensionContext): void {
                     // Use the forwarded URL — the site works there; sign-in
                     // needs the callback URL registered for that origin.
                     const origin = `${check.externalUri.scheme}://${check.externalUri.authority}`;
-                    void vscode.window.showWarningMessage(
+                    void vscode.window.showInformationMessage(
                         `EasyAuth: using the forwarded URL ${origin}. To sign in there, add ` +
                         `${origin}/oauth2/callback to your IdP app registration's redirect URIs.`
                     );

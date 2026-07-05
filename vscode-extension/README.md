@@ -101,6 +101,21 @@ The status bar item in the bottom-left corner shows the emulator state at a glan
 
 ---
 
+## Explorer View
+
+An **EasyAuth Emulator** view appears in the **Explorer** panel. It shows the same state as the status bar, and the view title bar offers actions matching the current state:
+
+| State | Buttons shown |
+| --- | --- |
+| Not configured | Open Settings |
+| Client secret not set | Set Client Secret |
+| Stopped / error | Start |
+| Starting / running | Restart, Stop |
+| Starting / running / error | Open Output |
+| Running | Open in Browser, Open in Private Browser (when configured; in remote sessions, Copy URL for Private Browser) |
+
+---
+
 ## Commands
 
 All commands are available from the Command Palette (`Ctrl`+`Shift`+`P`):
