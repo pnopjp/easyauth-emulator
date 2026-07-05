@@ -20,18 +20,20 @@ export interface SiteOrigin {
     scheme: string;
     /** Hostname from site.url, e.g. 'localhost', 'test.localhost', '127.0.0.1', '[::1]'. */
     host: string;
+    /** Port explicitly included in site.url, or null (IPv6 brackets don't count). */
+    explicitPort: number | null;
 }
 
-/** Scheme and host of the gateway as configured in easyauth.site.url (SITE_URL). */
+/** Scheme, host and optional explicit port of the gateway as configured in easyauth.site.url (SITE_URL). */
 export function getSiteOrigin(): SiteOrigin {
     const raw = vscode.workspace.getConfiguration('easyauth').get<string>('site.url', '').trim()
         || 'http://localhost';
     const uri = vscode.Uri.parse(raw);
     const scheme = uri.scheme === 'https' ? 'https' : 'http';
-    // SITE_URL carries no port (the port comes from site.port) but strip one
-    // defensively; IPv6 brackets are preserved ('[::1]' has no trailing digits).
+    const m = /:(\d+)$/.exec(uri.authority);
+    const explicitPort = m ? Number(m[1]) : null;
     const host = uri.authority.replace(/:(\d+)$/, '') || 'localhost';
-    return { scheme, host };
+    return { scheme, host, explicitPort };
 }
 
 /** True for hosts that resolve to the loopback interface on the client. */

@@ -5,7 +5,19 @@ import { PortDetector } from './portDetector';
 import { StatusBarManager } from './statusBar';
 import { SecretManager } from './secretManager';
 import { EmulatorTreeProvider, IdpInfo, IdpTreeItem } from './emulatorTreeProvider';
-import { checkPortForwarding, forwardingCheckApplies, getSiteOrigin } from './portForwarding';
+import { checkPortForwarding, forwardingCheckApplies, getSiteOrigin, isLoopbackHost } from './portForwarding';
+
+// URL of the gateway as the browser should reach it. For a loopback site.url
+// the gateway is addressed directly, so the listen port (site.port) applies.
+// A non-loopback site.url is a full public origin the user configured (tunnel
+// domain, reverse proxy, ...) — never bolt the listen port onto it; honor an
+// explicit port only when site.url itself contains one.
+function gatewayUrl(urlPath: string, listenPort: number): string {
+    const { scheme, host, explicitPort } = getSiteOrigin();
+    const port = isLoopbackHost(host) ? listenPort : explicitPort;
+    const authority = port !== null ? `${host}:${port}` : host;
+    return `${scheme}://${authority}${urlPath}`;
+}
 
 const BUILTIN_IDP_LABELS: Record<string, string> = {
     entra: 'Microsoft Entra ID',
@@ -240,7 +252,7 @@ export function activate(context: vscode.ExtensionContext): void {
         // digits, dots, hyphens, or a bracketed IPv6 literal) and a safe path is
         // acceptable. This prevents shell metacharacters from reaching cmd.exe
         // via a malformed URL.
-        if (!/^https?:\/\/(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9.-]+):\d{1,5}(\/[A-Za-z0-9._/-]*)?$/.test(url)) {
+        if (!/^https?:\/\/(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9.-]+)(:\d{1,5})?(\/[A-Za-z0-9._/-]*)?$/.test(url)) {
             outputChannel.error(`[extension] Private browser launch blocked: unsafe URL: ${url}`);
             void vscode.window.showErrorMessage('EasyAuth: Internal error: unsafe URL rejected.');
             return;
@@ -291,8 +303,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
                 return;
             }
-            const { scheme, host } = getSiteOrigin();
-            launchInPrivateBrowser(`${scheme}://${host}:${port}`);
+            launchInPrivateBrowser(gatewayUrl('', port));
         })
     );
 
@@ -331,22 +342,21 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    // Opens the gateway in the client's browser, preserving the scheme and
-    // host configured in site.url (https, test.localhost, 127.0.0.1, [::1], …)
-    // — cookies and TLS certificates are bound to that origin, and loopback
+    // Opens the gateway in the client's browser, preserving the origin
+    // configured in site.url (https, test.localhost, a tunnel domain, …) —
+    // cookies and TLS certificates are bound to that origin, and loopback
     // hosts resolve to the forwarded tunnel on the client anyway. In a remote
     // session, refuse with an error when VS Code forwarded site.port to a
     // different local port — new OAuth logins would fail there (the IdP
-    // redirects the browser to <site.url>:<site.port>, which no longer
-    // reaches the gateway).
+    // redirects the browser back to an origin that no longer reaches the
+    // gateway).
     async function openGatewayInBrowser(urlPath: string): Promise<void> {
         const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
         if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
             void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
             return;
         }
-        const { scheme, host } = getSiteOrigin();
-        const targetUri = vscode.Uri.parse(`${scheme}://${host}:${port}${urlPath}`);
+        const targetUri = vscode.Uri.parse(gatewayUrl(urlPath, port));
         if (!forwardingCheckApplies()) {
             void vscode.env.openExternal(targetUri);
             return;
@@ -402,8 +412,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
                 return;
             }
-            const { scheme, host } = getSiteOrigin();
-            launchInPrivateBrowser(`${scheme}://${host}:${port}/.auth/login/${item.idpKey}`);
+            launchInPrivateBrowser(gatewayUrl(`/.auth/login/${item.idpKey}`, port));
         })
     );
 
