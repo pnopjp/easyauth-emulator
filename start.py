@@ -87,6 +87,7 @@ def _configure_ssl(ca_bundle: str) -> None:
 
 
 _proc_stderr: dict[int, object] = {}  # pid → captured stderr (shown only on unexpected exit)
+_proc_label: dict[int, str] = {}  # pid → human-readable name shown on unexpected exit
 
 # ---------------------------------------------------------------------------
 # Child-process lifetime management
@@ -912,6 +913,7 @@ def main() -> None:
                 preexec_fn=_PREEXEC_FN,
             )
         _proc_stderr[proc.pid] = stderr_cap
+        _proc_label[proc.pid] = f"oauth2-proxy ({idp})"
         _processes.append(proc)
         _assign_to_job(proc)
 
@@ -924,6 +926,7 @@ def main() -> None:
         app_extra_args = ["--config", str(config_file)]
     print(f"[start] Starting app.py on port {site_port}")
     app_proc = _spawn_python_script(APP_PY, _APP_CHILD_FLAG, child_env or None, app_extra_args or None)
+    _proc_label[app_proc.pid] = "app.py"
     _processes.append(app_proc)
     _assign_to_job(app_proc)
 
@@ -931,6 +934,7 @@ def main() -> None:
     if SAMPLE_APP_PY.exists() and sample_app_enabled:
         print(f"[start] Starting sample_app.py on port {sample_app_port}")
         sample_proc = _spawn_python_script(SAMPLE_APP_PY, _SAMPLE_APP_CHILD_FLAG)
+        _proc_label[sample_proc.pid] = "sample_app.py"
         _processes.append(sample_proc)
         _assign_to_job(sample_proc)
 
@@ -941,7 +945,7 @@ def main() -> None:
             for proc in _processes:
                 ret = proc.poll()
                 if ret is not None:
-                    name = Path(proc.args[0]).name if proc.args else "process"
+                    name = _proc_label.get(proc.pid) or (Path(proc.args[0]).name if proc.args else "process")
                     print(f"[start] {name} exited unexpectedly (code {ret})", file=sys.stderr)
                     cap = _proc_stderr.get(proc.pid)
                     if cap is not None:
