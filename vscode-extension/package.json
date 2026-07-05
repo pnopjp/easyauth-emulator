@@ -90,7 +90,7 @@
             "type": "string",
             "default": "",
             "order": 7,
-            "markdownDescription": "Command to launch a private/incognito browser window. The site URL is appended as the last argument.\n\n**Examples:**\n- `msedge --inprivate`\n- `chrome --incognito`\n- `firefox --private-window`\n\nLeave empty to hide the private browser button."
+            "markdownDescription": "Command to launch a private/incognito browser window. The site URL is appended as the last argument.\n\n**Examples:**\n- `msedge --inprivate`\n- `chrome --incognito`\n- `firefox --private-window`\n\nLeave empty to hide the private browser button.\n\n**Not used in remote sessions** (Remote - SSH / Tunnels): a browser cannot be launched on your local PC from the remote host, so the buttons copy the URL to the clipboard instead."
           }
         }
       },
@@ -591,7 +591,12 @@
         },
         {
           "command": "easyauth.openInPrivateBrowser",
-          "when": "view == easyauth.statusView && easyauth.state == running && easyauth.privateBrowserConfigured",
+          "when": "view == easyauth.statusView && easyauth.state == running && easyauth.privateBrowserConfigured && !easyauth.isRemote",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.copyPrivateBrowserUrl",
+          "when": "view == easyauth.statusView && easyauth.state == running && easyauth.isRemote",
           "group": "navigation"
         },
         {
@@ -637,7 +642,12 @@
         },
         {
           "command": "easyauth.idp.openInPrivateBrowser",
-          "when": "view == easyauth.statusView && viewItem == easyauth.idp && easyauth.privateBrowserConfigured",
+          "when": "view == easyauth.statusView && viewItem == easyauth.idp && easyauth.privateBrowserConfigured && !easyauth.isRemote",
+          "group": "inline@2"
+        },
+        {
+          "command": "easyauth.idp.copyPrivateBrowserUrl",
+          "when": "view == easyauth.statusView && viewItem == easyauth.idp && easyauth.isRemote",
           "group": "inline@2"
         }
       ]
@@ -686,6 +696,20 @@
         "category": "EasyAuth Emulator",
         "title": "Open in Private Browser",
         "icon": "$(eye-closed)"
+      },
+      {
+        "command": "easyauth.copyPrivateBrowserUrl",
+        "category": "EasyAuth Emulator",
+        "title": "Copy URL for Private Browser",
+        "shortTitle": "Copy Private URL",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "easyauth.idp.copyPrivateBrowserUrl",
+        "category": "EasyAuth Emulator",
+        "title": "Copy IDP Login URL for Private Browser",
+        "shortTitle": "Copy Private URL",
+        "icon": "$(copy)"
       },
       {
         "command": "easyauth.setSecret",

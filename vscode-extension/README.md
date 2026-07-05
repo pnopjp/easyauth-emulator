@@ -32,6 +32,7 @@ The extension auto-detects your app's listening port from `launch.json`, framewo
 - **Secure credential storage** — client secrets are stored in the OS keychain, never in settings files
 - **Custom OIDC providers** — add any OIDC-compatible provider via `easyauth.customIdps`
 - **Status bar indicator** — click to interact with the emulator based on its current state (start, stop, or open logs)
+- **Private browser launch** — set `easyauth.privateBrowser.command` to get a button that opens the gateway URL in a private/incognito window (in remote sessions the button copies the URL to the clipboard instead)
 
 ---
 
@@ -111,6 +112,8 @@ All commands are available from the Command Palette (`Ctrl`+`Shift`+`P`):
 | `EasyAuth Emulator: Restart` | Restart the emulator (picks up config changes) |
 | `EasyAuth Emulator: Open Output` | Open the log output channel |
 | `EasyAuth Emulator: Open in Browser` | Open the gateway URL in the browser |
+| `EasyAuth Emulator: Open in Private Browser` | Open the gateway URL in a private/incognito window (shown when `easyauth.privateBrowser.command` is set). In remote sessions the URL is copied to the clipboard instead — a browser cannot be launched on your local PC from the remote host |
+| `EasyAuth Emulator: Copy URL for Private Browser` | Copy the gateway URL to the clipboard (shown instead of "Open in Private Browser" in remote sessions) |
 | `EasyAuth Emulator: Set Client Secret` | Store a client secret in the OS keychain |
 | `EasyAuth Emulator: Clear Client Secret` | Remove a stored client secret |
 
@@ -191,6 +194,7 @@ The extension always passes `--config .vscode/easyauth.toml` to the emulator on 
 | `easyauth.portScanMax` | `5` | Ports to scan during auto-detection |
 | `easyauth.portScanBase` | `null` | Base port for scanning; `null` = use first hint found |
 | `easyauth.verbose` | `false` | Log all resolved configuration values on startup |
+| `easyauth.privateBrowser.command` | `""` | Command that launches a private/incognito browser window; the site URL is appended as the last argument (e.g. `msedge --inprivate`, `chrome --incognito`, `firefox --private-window`). Empty hides the button. Not used in remote sessions (the button copies the URL to the clipboard instead) |
 
 ### Gateway
 
@@ -322,10 +326,31 @@ For additional troubleshooting topics — including oauth2-proxy error diagnosis
 
 ---
 
+## Remote Development
+
+The extension and the emulator run on the remote host in both cases.
+
+### Remote - SSH
+
+Works with the default settings. The gateway is reached via `http://localhost:<site.port>` through VS Code port forwarding.
+
+### Remote - Tunnels
+
+The gateway is exposed through a forwarded tunnel URL (e.g. `https://xxxxxxxx-8080.usw2.devtunnels.ms`) instead of `localhost`. To sign in:
+
+1. Find the forwarded URL — start a debug session (or the emulator) once; the URL is shown in the EasyAuth Emulator output and in the notification when you click **Open in Browser**.
+2. Set `easyauth.site.url` to that URL (origin only, no trailing slash).
+3. Add `<forwarded URL>/oauth2/callback` to your IdP app registration's redirect URIs.
+
+The forwarded URL stays the same while the tunnel exists, but changes when the tunnel is re-created — e.g. after `code tunnel unregister`, or when an unused tunnel expires (by default after 30 days of inactivity). Update `easyauth.site.url` and the IdP redirect URI when that happens. See ["When are unused dev tunnels deleted?" in the dev tunnels FAQ](https://learn.microsoft.com/azure/developer/dev-tunnels/faq#when-are-unused-dev-tunnels-deleted) for tunnel lifetime details.
+
+When you switch the same workspace back to Remote - SSH or local development, reset `easyauth.site.url` to the default (`http://localhost`).
+
+---
+
 ## Known Limitations
 
 - `X-MS-TOKEN-AAD-EXPIRES-ON` and `X-MS-TOKEN-AAD-REFRESH-TOKEN` headers are not implemented
-- Remote - SSH is supported (the extension and emulator run on the remote host). With Remote - Tunnels, access the gateway through the forwarded tunnel URL and register `<forwarded-origin>/oauth2/callback` with your IdP to sign in
 - This is a development tool, not a byte-for-byte replica of Azure Easy Auth
 
 ---

@@ -207,7 +207,7 @@ openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
 <ブラウザがアクセスしている origin>/oauth2/callback
 ```
 
-例: `http://localhost:8080/oauth2/callback`、転送ドメイン経由なら `https://xxx-8080.jpe1.devtunnels.ms/oauth2/callback`。使用する origin ごとに 1 件ずつ登録してください。
+例: `http://localhost:8080/oauth2/callback`、転送ドメイン経由なら `https://xxx-8080.usw2.devtunnels.ms/oauth2/callback`。使用する origin ごとに 1 件ずつ登録してください。
 
 ### アプリに到達できない（502 エラー）
 

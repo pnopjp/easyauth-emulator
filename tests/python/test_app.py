@@ -422,10 +422,10 @@ class TestBuildProviderLogoutUrl:
         from urllib.parse import unquote
         monkeypatch.setenv("IDP_ENTRA_LOGOUT_ENDPOINT", "https://logout.example.com/end")
         result = _build_provider_logout_url(
-            "entra", "/bye", proto="https", host="xxx-8080.jpe1.devtunnels.ms"
+            "entra", "/bye", proto="https", host="xxx-8080.usw2.devtunnels.ms"
         )
         decoded = unquote(result)
-        assert "https://xxx-8080.jpe1.devtunnels.ms/bye" in decoded
+        assert "https://xxx-8080.usw2.devtunnels.ms/bye" in decoded
 
     def test_request_host_without_proto_falls_back_to_default(self, monkeypatch):
         from urllib.parse import unquote

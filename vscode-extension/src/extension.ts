@@ -100,6 +100,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
     updatePrivateBrowserContext();
     void updateSecretContext();
+    // Remote sessions swap the private-browser buttons for copy-URL buttons
+    // (a browser cannot be launched on the client PC from the remote host).
+    void vscode.commands.executeCommand('setContext', 'easyauth.isRemote', vscode.env.remoteName !== undefined);
 
     context.subscriptions.push(
         treeProvider,
@@ -297,7 +300,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('easyauth.openInPrivateBrowser', () => {
+        vscode.commands.registerCommand('easyauth.openInPrivateBrowser', async () => {
+            if (vscode.env.remoteName !== undefined) {
+                await copyGatewayUrlForPrivateBrowser('');
+                return;
+            }
             const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
             if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
                 void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
@@ -342,31 +349,29 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    // Opens the gateway in the client's browser, preserving the origin
-    // configured in site.url (https, test.localhost, a tunnel domain, …) —
-    // cookies and TLS certificates are bound to that origin, and loopback
-    // hosts resolve to the forwarded tunnel on the client anyway. In a remote
-    // session, refuse with an error when VS Code forwarded site.port to a
-    // different local port — new OAuth logins would fail there (the IdP
-    // redirects the browser back to an origin that no longer reaches the
-    // gateway).
-    async function openGatewayInBrowser(urlPath: string): Promise<void> {
+    // Resolves the gateway URL the client's browser should use, preserving
+    // the origin configured in site.url (https, test.localhost, a tunnel
+    // domain, …) — cookies and TLS certificates are bound to that origin, and
+    // loopback hosts resolve to the forwarded tunnel on the client anyway.
+    // In a remote session, returns null with an error when VS Code forwarded
+    // site.port to a different local port — new OAuth logins would fail there
+    // (the IdP redirects the browser back to an origin that no longer reaches
+    // the gateway).
+    async function resolveGatewayBrowserUrl(urlPath: string): Promise<vscode.Uri | null> {
         const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
         if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
             void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
-            return;
+            return null;
         }
         const targetUri = vscode.Uri.parse(gatewayUrl(urlPath, port));
         if (!forwardingCheckApplies()) {
-            void vscode.env.openExternal(targetUri);
-            return;
+            return targetUri;
         }
         try {
             const check = await checkPortForwarding(port);
             switch (check.kind) {
                 case 'match':
-                    void vscode.env.openExternal(targetUri);
-                    return;
+                    return targetUri;
                 case 'mismatch':
                     void vscode.window.showErrorMessage(
                         `EasyAuth: cannot open the browser — port ${port} is forwarded to a different local port ` +
@@ -374,29 +379,49 @@ export function activate(context: vscode.ExtensionContext): void {
                         `port ${port}. 2) Quit the app using port ${port} on your PC, or change the easyauth.site.port ` +
                         `setting. Then try again.`
                     );
-                    return;
+                    return null;
                 case 'external-domain': {
-                    // Open the forwarded URL — the site works there, only sign-in does not.
-                    const externalUri = check.externalUri.with({
-                        path: check.externalUri.path.replace(/\/$/, '') + urlPath,
-                    });
+                    // Use the forwarded URL — the site works there; sign-in
+                    // needs the callback URL registered for that origin.
                     const origin = `${check.externalUri.scheme}://${check.externalUri.authority}`;
                     void vscode.window.showWarningMessage(
-                        `EasyAuth: opening the forwarded URL ${origin}. To sign in there, add ` +
+                        `EasyAuth: using the forwarded URL ${origin}. To sign in there, add ` +
                         `${origin}/oauth2/callback to your IdP app registration's redirect URIs and set ` +
                         `easyauth.site.url to ${origin}.`
                     );
-                    void vscode.env.openExternal(externalUri);
-                    return;
+                    return check.externalUri.with({
+                        path: check.externalUri.path.replace(/\/$/, '') + urlPath,
+                    });
                 }
                 case 'unknown':
-                    void vscode.env.openExternal(targetUri);
-                    return;
+                    return targetUri;
             }
         } catch (err) {
             outputChannel.warn(`[extension] Port forwarding check failed: ${err}`);
-            void vscode.env.openExternal(targetUri);
+            return targetUri;
         }
+    }
+
+    async function openGatewayInBrowser(urlPath: string): Promise<void> {
+        const uri = await resolveGatewayBrowserUrl(urlPath);
+        if (uri) {
+            void vscode.env.openExternal(uri);
+        }
+    }
+
+    // Remote sessions cannot launch a browser on the client PC (cp.spawn runs
+    // on the remote host), so the private-browser actions copy the URL for
+    // manual pasting into a private/incognito window instead.
+    async function copyGatewayUrlForPrivateBrowser(urlPath: string): Promise<void> {
+        const uri = await resolveGatewayBrowserUrl(urlPath);
+        if (!uri) {
+            return;
+        }
+        await vscode.env.clipboard.writeText(uri.toString(true));
+        void vscode.window.showInformationMessage(
+            'EasyAuth: URL copied to the clipboard — paste it into a private/incognito browser window ' +
+            '(a private browser cannot be launched on your PC from a remote session).'
+        );
     }
 
     context.subscriptions.push(
@@ -406,13 +431,26 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('easyauth.idp.openInPrivateBrowser', (item: IdpTreeItem) => {
+        vscode.commands.registerCommand('easyauth.idp.openInPrivateBrowser', async (item: IdpTreeItem) => {
+            if (vscode.env.remoteName !== undefined) {
+                await copyGatewayUrlForPrivateBrowser(`/.auth/login/${item.idpKey}`);
+                return;
+            }
             const port = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
             if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
                 void vscode.window.showErrorMessage('EasyAuth: invalid listen port in configuration.');
                 return;
             }
             launchInPrivateBrowser(gatewayUrl(`/.auth/login/${item.idpKey}`, port));
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('easyauth.copyPrivateBrowserUrl', async () => {
+            await copyGatewayUrlForPrivateBrowser('');
+        }),
+        vscode.commands.registerCommand('easyauth.idp.copyPrivateBrowserUrl', async (item: IdpTreeItem) => {
+            await copyGatewayUrlForPrivateBrowser(`/.auth/login/${item.idpKey}`);
         })
     );
 

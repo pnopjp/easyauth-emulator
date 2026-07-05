@@ -35,6 +35,8 @@ suite('Extension', () => {
             'easyauth.openSettings',
             'easyauth.idp.openInBrowser',
             'easyauth.idp.openInPrivateBrowser',
+            'easyauth.copyPrivateBrowserUrl',
+            'easyauth.idp.copyPrivateBrowserUrl',
         ];
         for (const cmd of expected) {
             assert.ok(registered.includes(cmd), `Command "${cmd}" should be registered`);

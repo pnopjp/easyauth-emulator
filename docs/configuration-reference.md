@@ -207,7 +207,7 @@ Redirect URI mismatch. The callback URL follows the origin shown in the browser'
 <origin the browser uses>/oauth2/callback
 ```
 
-For example: `http://localhost:8080/oauth2/callback`, or `https://xxx-8080.jpe1.devtunnels.ms/oauth2/callback` when accessing through a forwarded domain. Register one entry per origin you use.
+For example: `http://localhost:8080/oauth2/callback`, or `https://xxx-8080.usw2.devtunnels.ms/oauth2/callback` when accessing through a forwarded domain. Register one entry per origin you use.
 
 ### App not reachable (502 error)
 
