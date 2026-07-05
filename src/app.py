@@ -189,7 +189,10 @@ DEBUG_HEADERS_ENDPOINT_ENABLED = _parse_bool_cfg("DEBUG_HEADERS_ENDPOINT_ENABLED
 TLS_CERT_FILE = (_cfg("TLS_CERT_FILE") or "").strip()
 TLS_KEY_FILE  = (_cfg("TLS_KEY_FILE")  or "").strip()
 _TLS_ENABLED  = bool(TLS_CERT_FILE and TLS_KEY_FILE)
-_DEFAULT_PROTO = "https" if _TLS_ENABLED else "http"
+# Fallback protocol when the request carries no X-Forwarded-Proto — also
+# honour an https SITE_URL, which covers TLS-terminating front ends (tunnel
+# domains, reverse proxies) that may not send the header.
+_DEFAULT_PROTO = "https" if (_TLS_ENABLED or SITE_URL.startswith("https://")) else "http"
 COOKIE_SECURE = _parse_bool_cfg("OAUTH2_PROXY_COOKIE_SECURE") or _TLS_ENABLED
 
 
@@ -263,7 +266,8 @@ def _idp_logout_endpoint(idp: str) -> str:
     return ""
 
 
-def _build_provider_logout_url(idp: str, post_logout_redirect_uri: str) -> str:
+def _build_provider_logout_url(idp: str, post_logout_redirect_uri: str,
+                               proto: str = "", host: str = "") -> str:
     endpoint = _idp_logout_endpoint(idp)
     if not endpoint:
         return ""
@@ -271,11 +275,17 @@ def _build_provider_logout_url(idp: str, post_logout_redirect_uri: str) -> str:
     query_items = dict(parse_qsl(parsed.query, keep_blank_values=True))
     absolute_post_logout_redirect_uri = post_logout_redirect_uri
     if not urlparse(absolute_post_logout_redirect_uri).scheme:
-        parsed_site = urlparse(SITE_URL)
-        default_port = "443" if parsed_site.scheme == "https" else "80"
-        base_site_url = SITE_URL
-        if SITE_PORT != default_port:
-            base_site_url = f"{SITE_URL}:{SITE_PORT}"
+        if host:
+            # Follow the origin the browser actually used (Host header),
+            # like the OAuth callback URL — SITE_URL/SITE_PORT are only a
+            # fallback for requests without a Host header.
+            base_site_url = f"{proto or _DEFAULT_PROTO}://{host}"
+        else:
+            parsed_site = urlparse(SITE_URL)
+            default_port = "443" if parsed_site.scheme == "https" else "80"
+            base_site_url = SITE_URL
+            if SITE_PORT != default_port:
+                base_site_url = f"{SITE_URL}:{SITE_PORT}"
         absolute_post_logout_redirect_uri = urljoin(
             f"{base_site_url}/", post_logout_redirect_uri.lstrip("/")
         )
@@ -744,7 +754,11 @@ class _Handler(BaseHTTPRequestHandler):
     def _handle_auth_provider_logout(self, idp: str) -> None:
         normalized = idp.strip().lower()
         rd = _safe_redirect(self._query_param("post_logout_redirect_uri", "/"))
-        provider_logout_url = _build_provider_logout_url(normalized, rd)
+        provider_logout_url = _build_provider_logout_url(
+            normalized, rd,
+            proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
+            host=self._header("Host"),
+        )
         if provider_logout_url:
             self._redirect(provider_logout_url)
             return

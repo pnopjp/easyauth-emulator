@@ -22,8 +22,8 @@ Security note:
 | --- | :---: | --- | --- |
 | `IDP_LIST` | ✓ | — | Comma-separated IDP names to enable (e.g. `entra,google`). Order controls the selection page display order. |
 | `DEFAULT_IDP` | | — | Default IDP when no session or selection cookie is present. Must be one of the `IDP_LIST` values. See default selection behavior below. |
-| `SITE_URL` | | `http://localhost` | Public base URL of this gateway without a trailing slash. Used to construct the OAuth2 callback URL. |
-| `SITE_PORT` | | `8080` | Public port of this gateway. Combined with `SITE_URL` to form the gateway base URL. |
+| `SITE_URL` | | `http://localhost` | Fallback base URL used when a request carries no `Host` header (without a trailing slash). Usually no change needed. Set an `https://` value when the gateway sits behind a TLS-terminating front end (tunnel domain, reverse proxy). |
+| `SITE_PORT` | | `8080` | Listen port of this gateway (also the public port when accessed directly). |
 | `APP_UPSTREAM` | | `http://localhost:8081` ※ | URL that authenticated requests are forwarded to. Set to your application's URL when using your own app. |
 | `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | Enables the `GET /.debug/headers` diagnostic endpoint. When enabled, that URL shows the headers the emulator receives and computes. Disabled by default — returns `404`. |
 | `SKIP_AUTH_ROUTES` | | — | Routes that bypass authentication and are forwarded directly to the upstream. Format: comma-separated list of `[METHOD=]REGEX` patterns matched against the request path. Example: `GET=^/health$,^/public/`. Injected auth headers are stripped before forwarding. |
@@ -201,13 +201,13 @@ Verify `IDP_<NAME>_CLIENT_ID` and `IDP_<NAME>_CLIENT_SECRET` match your IdP app 
 
 ### Login fails after IdP redirect (`AADSTS50011`)
 
-Redirect URI mismatch. Update the redirect URI in your IdP app registration (Authentication) to match:
+Redirect URI mismatch. The callback URL follows the origin shown in the browser's address bar. Update the redirect URI in your IdP app registration (Authentication) to match:
 
 ```text
-<SITE_URL>:<SITE_PORT>/oauth2/callback
+<origin the browser uses>/oauth2/callback
 ```
 
-For example: `http://localhost:8080/oauth2/callback`
+For example: `http://localhost:8080/oauth2/callback`, or `https://xxx-8080.jpe1.devtunnels.ms/oauth2/callback` when accessing through a forwarded domain. Register one entry per origin you use.
 
 ### App not reachable (502 error)
 

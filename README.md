@@ -124,10 +124,10 @@ For the full list of variables, see [docs/configuration-reference.md](docs/confi
 Register the OAuth2 callback URL in your identity provider:
 
 ```text
-http://<SITE_URL host>:<SITE_PORT>/oauth2/callback
+http://localhost:8080/oauth2/callback
 ```
 
-Example: `http://localhost:8080/oauth2/callback`
+Adjust the port to your `SITE_PORT`. If you also access the gateway through another origin (e.g. a forwarded tunnel domain), register that origin's `/oauth2/callback` as well — one entry per origin.
 
 ## Usage
 

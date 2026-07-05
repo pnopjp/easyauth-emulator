@@ -238,15 +238,17 @@ export class EmulatorManager implements vscode.Disposable {
                     `[extension] Port forwarding OK: http://localhost:${sitePort} on your PC reaches the emulator.`
                 );
                 return;
-            case 'external-domain':
+            case 'external-domain': {
+                const origin = `${check.externalUri.scheme}://${check.externalUri.authority}`;
                 this.outputChannel.warn(
-                    `[extension] This environment exposes the emulator through a forwarded URL: ${check.externalUri.toString(true)}\n` +
-                    `The site is reachable there, but OAuth sign-in through that URL is not supported yet ` +
-                    `(login callbacks go to http://localhost:${sitePort}).\n` +
-                    `To sign in: open the PORTS panel (bottom panel, next to TERMINAL), forward port ${sitePort}, ` +
-                    `and open http://localhost:${sitePort} on your PC.`
+                    `[extension] This environment exposes the emulator through a forwarded URL: ${origin}\n` +
+                    `The OAuth callback URL follows the origin the browser uses, so to sign in there:\n` +
+                    `  1. Add ${origin}/oauth2/callback to your IdP app registration's redirect URIs.\n` +
+                    `  2. Set "easyauth.site.url" to ${origin} (marks the gateway as behind an HTTPS front end).\n` +
+                    `Note: http://localhost:${sitePort} on your PC is NOT forwarded in this environment (unlike Remote - SSH).`
                 );
                 return;
+            }
             case 'unknown':
                 this.outputChannel.warn(
                     `[extension] Could not interpret the forwarded address for port ${sitePort}: ` +

@@ -417,3 +417,19 @@ class TestBuildProviderLogoutUrl:
         monkeypatch.setenv("IDP_ENTRA_LOGOUT_ENDPOINT", "https://logout.example.com/end")
         result = _build_provider_logout_url("entra", "https://myapp.example.com/signed-out")
         assert "myapp.example.com" in result
+
+    def test_relative_redirect_uses_request_host(self, monkeypatch):
+        from urllib.parse import unquote
+        monkeypatch.setenv("IDP_ENTRA_LOGOUT_ENDPOINT", "https://logout.example.com/end")
+        result = _build_provider_logout_url(
+            "entra", "/bye", proto="https", host="xxx-8080.jpe1.devtunnels.ms"
+        )
+        decoded = unquote(result)
+        assert "https://xxx-8080.jpe1.devtunnels.ms/bye" in decoded
+
+    def test_request_host_without_proto_falls_back_to_default(self, monkeypatch):
+        from urllib.parse import unquote
+        monkeypatch.setenv("IDP_ENTRA_LOGOUT_ENDPOINT", "https://logout.example.com/end")
+        result = _build_provider_logout_url("entra", "/bye", host="localhost:8080")
+        decoded = unquote(result)
+        assert "://localhost:8080/bye" in decoded

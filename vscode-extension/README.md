@@ -70,7 +70,7 @@ Add the following redirect URI in your identity provider's app registration:
 http://localhost:8080/oauth2/callback
 ```
 
-If you changed `easyauth.site.port`, use that port instead.
+If you changed `easyauth.site.port`, use that port instead. If you also access the gateway through another origin (e.g. a forwarded tunnel domain), register that origin's `/oauth2/callback` as well — one entry per origin.
 
 > **GitHub and Facebook** have additional setup requirements. See [GitHub Provider Notes](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#github-provider-notes) and [Facebook Provider Notes](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#facebook-provider-notes) in the configuration reference.
 
@@ -196,8 +196,8 @@ The extension always passes `--config .vscode/easyauth.toml` to the emulator on 
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `easyauth.site.url` | `http://localhost` | Public base URL (used to build the OAuth2 callback URL) |
-| `easyauth.site.port` | `8080` | Public port of the EasyAuth gateway |
+| `easyauth.site.url` | `http://localhost` | Usually no change needed. Set an `https://` value when the gateway sits behind a TLS-terminating front end (tunnel domain, reverse proxy) |
+| `easyauth.site.port` | `8080` | Listen port of the EasyAuth gateway (also the public port when accessed directly) |
 | `easyauth.tls.certFile` | `""` | Path to the TLS certificate file (PEM). Set with `tls.keyFile` to enable HTTPS. Required for Facebook Login. |
 | `easyauth.tls.keyFile` | `""` | Path to the TLS private key file (PEM). Set with `tls.certFile` to enable HTTPS. Required for Facebook Login. |
 | `easyauth.defaultIdp` | `""` | Default IdP when `/.auth/login` is accessed |
@@ -267,13 +267,13 @@ Microsoft Entra ID's client ID and secret are configured, but the OIDC Issuer UR
 
 ### Login fails — redirect URI mismatch (`AADSTS50011` or similar)
 
-Register the following redirect URI in your IdP's app registration:
+The callback URL follows the origin shown in your browser's address bar. Register the matching redirect URI in your IdP's app registration:
 
 ```text
-http://localhost:8080/oauth2/callback
+<origin the browser uses>/oauth2/callback
 ```
 
-If you changed `easyauth.site.port`, use that port number instead.
+For example `http://localhost:8080/oauth2/callback` (or with the port set in `easyauth.site.port`). Register one entry per origin you use.
 
 ### Login fails — `invalid_client`
 
@@ -325,7 +325,7 @@ For additional troubleshooting topics — including oauth2-proxy error diagnosis
 ## Known Limitations
 
 - `X-MS-TOKEN-AAD-EXPIRES-ON` and `X-MS-TOKEN-AAD-REFRESH-TOKEN` headers are not implemented
-- Remote - SSH and Remote - Tunnels extensions have not been tested
+- Remote - SSH is supported (the extension and emulator run on the remote host). With Remote - Tunnels, access the gateway through the forwarded tunnel URL and register `<forwarded-origin>/oauth2/callback` with your IdP to sign in
 - This is a development tool, not a byte-for-byte replica of Azure Easy Auth
 
 ---

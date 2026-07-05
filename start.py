@@ -324,7 +324,7 @@ _IDP_DEFAULT_KIND: dict[str, str] = {
 
 
 def _process_idp(env: dict, idp: str, port: int,
-                 base_site_url: str, whitelist_domain: str) -> dict:
+                 whitelist_domain: str) -> dict:
     """Validate one IDP entry and return its oauth2-proxy launch args."""
     up_idp = idp.upper().replace("-", "_")
     pfx = f"IDP_{up_idp}"
@@ -364,7 +364,14 @@ def _process_idp(env: dict, idp: str, port: int,
 
     cookie_secret = _get(env, "OAUTH2_PROXY_COOKIE_SECRET")
     cookie_secure = _get(env, "OAUTH2_PROXY_COOKIE_SECURE", "false")
-    redirect_url  = f"{base_site_url}/oauth2/callback"
+    # Path-only redirect URL: oauth2-proxy fills in the scheme and host from
+    # X-Forwarded-Proto / X-Forwarded-Host on each request (reverse-proxy mode
+    # with a trusted proxy — both configured below), so the OAuth callback
+    # follows whatever origin the browser used (localhost, a forwarded port,
+    # a tunnel domain, ...) as long as that origin is registered with the IdP.
+    # This mirrors real Azure Easy Auth, which derives the callback URL from
+    # the incoming request host.
+    redirect_url  = "/oauth2/callback"
     cookie_name   = f"_oauth2_proxy_{idp}"
 
     args = [
@@ -845,7 +852,7 @@ def main() -> None:
             _die(f"Invalid IDP name in IDP_LIST: {idp!r}")
 
         port = PORT_BASE + i
-        cfg  = _process_idp(env, idp, port, base_site_url, whitelist_domain)
+        cfg  = _process_idp(env, idp, port, whitelist_domain)
         for ip in trusted_proxy_ips:
             cfg["args"].append(f"--trusted-proxy-ip={ip}")
         idp_configs.append((idp, cfg))

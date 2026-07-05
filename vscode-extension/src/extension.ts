@@ -370,10 +370,11 @@ export function activate(context: vscode.ExtensionContext): void {
                     const externalUri = check.externalUri.with({
                         path: check.externalUri.path.replace(/\/$/, '') + urlPath,
                     });
+                    const origin = `${check.externalUri.scheme}://${check.externalUri.authority}`;
                     void vscode.window.showWarningMessage(
-                        `EasyAuth: opening the forwarded URL ${check.externalUri.toString(true)} — OAuth sign-in through ` +
-                        `it is not supported yet. To sign in, forward port ${port} in the PORTS panel and open ` +
-                        `http://localhost:${port} on your PC.`
+                        `EasyAuth: opening the forwarded URL ${origin}. To sign in there, add ` +
+                        `${origin}/oauth2/callback to your IdP app registration's redirect URIs and set ` +
+                        `easyauth.site.url to ${origin}.`
                     );
                     void vscode.env.openExternal(externalUri);
                     return;

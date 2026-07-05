@@ -103,14 +103,14 @@
             "default": "http://localhost",
             "scope": "resource",
             "order": 1,
-            "markdownDescription": "`SITE_URL`: Public base URL of the EasyAuth gateway (without trailing slash). Used to construct the OAuth2 callback URL."
+            "markdownDescription": "`SITE_URL`: Fallback base URL of the EasyAuth gateway, used when a request carries no Host header (without trailing slash). Usually no change needed. Set an `https://` value when the gateway sits behind a TLS-terminating front end (tunnel domain, reverse proxy)."
           },
           "easyauth.site.port": {
             "type": "number",
             "default": 8080,
             "scope": "resource",
             "order": 2,
-            "markdownDescription": "`SITE_PORT`: Public port of the EasyAuth gateway."
+            "markdownDescription": "`SITE_PORT`: Listen port of the EasyAuth gateway (also the public port when accessed directly)."
           },
           "easyauth.tls.certFile": {
             "type": "string",
