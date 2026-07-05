@@ -798,8 +798,16 @@ def main() -> None:
     else:
         _die("SITE_URL must start with http:// or https://")
 
+    tls_cert = _get(env, "TLS_CERT_FILE", "").strip()
+    tls_key  = _get(env, "TLS_KEY_FILE",  "").strip()
+    tls_enabled = bool(tls_cert and tls_key)
+
     site_host = site_host.split("/")[0]
-    if site_port == default_port:
+    # An https SITE_URL without local TLS files means a TLS-terminating front
+    # end (tunnel domain, reverse proxy) serves the public origin on its own
+    # port — SITE_PORT is only the local listen port then, not public.
+    behind_tls_front = site_url.startswith("https://") and not tls_enabled
+    if site_port == default_port or behind_tls_front:
         base_site_url     = site_url
         default_whitelist = site_host
     else:
@@ -809,9 +817,6 @@ def main() -> None:
     whitelist_domain = _get(env, "OAUTH2_PROXY_WHITELIST_DOMAIN", default_whitelist)
 
     # ---- TLS certificate validation ----------------------------------------
-    tls_cert = _get(env, "TLS_CERT_FILE", "").strip()
-    tls_key  = _get(env, "TLS_KEY_FILE",  "").strip()
-    tls_enabled = bool(tls_cert and tls_key)
 
     if tls_enabled:
         if not Path(tls_cert).exists():

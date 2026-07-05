@@ -433,3 +433,15 @@ class TestBuildProviderLogoutUrl:
         result = _build_provider_logout_url("entra", "/bye", host="localhost:8080")
         decoded = unquote(result)
         assert "://localhost:8080/bye" in decoded
+
+    def test_fallback_omits_listen_port_behind_tls_front(self, monkeypatch):
+        from urllib.parse import unquote
+        import src.app as m
+        monkeypatch.setattr(m, "SITE_URL", "https://xxx-8080.usw2.devtunnels.ms")
+        monkeypatch.setattr(m, "SITE_PORT", "8080")
+        monkeypatch.setattr(m, "_TLS_ENABLED", False)
+        monkeypatch.setenv("IDP_ENTRA_LOGOUT_ENDPOINT", "https://logout.example.com/end")
+        result = _build_provider_logout_url("entra", "/bye")
+        decoded = unquote(result)
+        assert "https://xxx-8080.usw2.devtunnels.ms/bye" in decoded
+        assert "devtunnels.ms:8080" not in decoded

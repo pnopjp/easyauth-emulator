@@ -284,7 +284,11 @@ def _build_provider_logout_url(idp: str, post_logout_redirect_uri: str,
             parsed_site = urlparse(SITE_URL)
             default_port = "443" if parsed_site.scheme == "https" else "80"
             base_site_url = SITE_URL
-            if SITE_PORT != default_port:
+            # An https SITE_URL without local TLS files means a TLS-terminating
+            # front end serves the public origin — SITE_PORT is only the local
+            # listen port then, not part of the public URL.
+            behind_tls_front = parsed_site.scheme == "https" and not _TLS_ENABLED
+            if SITE_PORT != default_port and not behind_tls_front:
                 base_site_url = f"{SITE_URL}:{SITE_PORT}"
         absolute_post_logout_redirect_uri = urljoin(
             f"{base_site_url}/", post_logout_redirect_uri.lstrip("/")
