@@ -417,6 +417,15 @@ def _check_auth(idp: str, cookie: str, real_ip: str, proto: str, host: str, uri:
 
 class _Handler(BaseHTTPRequestHandler):
     server_version = "EasyAuthNative/1.0"
+    # HTTP/1.1 persistent connections. Front ends that pool backend
+    # connections (e.g. the dev tunnels edge) race against HTTP/1.0's
+    # close-after-response and lose requests (intermittent hangs / 504s).
+    # Requires every response to carry Content-Length — all response
+    # helpers and _proxy_to do.
+    protocol_version = "HTTP/1.1"
+    # Drop keep-alive connections after 2 minutes of inactivity so idle
+    # front-end connections don't pin handler threads forever.
+    timeout = 120
 
     def log_message(self, *_) -> None:
         return
