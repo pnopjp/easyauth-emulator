@@ -231,21 +231,21 @@ export class EmulatorManager implements vscode.Disposable {
 
         const { scheme, host } = getSiteOrigin();
         this.outputChannelError(
-            `[extension] Error: remote port ${sitePort} forwards to local port ${check.localPort} on the client ` +
-            `machine, but OAuth callbacks target ${scheme}://${host}:${sitePort} and would not reach the emulator — ` +
-            `it has been stopped. Likely causes, in order: ` +
-            `(1) the Ports panel already has an entry mapping port ${sitePort} to local port ${check.localPort} ` +
-            `(left over from an earlier attempt) — remove it or change its local address back to ${sitePort}; ` +
-            `(2) local port ${sitePort} is in use on the client machine — free it or change easyauth.site.port. ` +
-            `Note: on a Windows client a port can also be reserved by Hyper-V/WSL even when it looks free ` +
-            `(check with: netsh interface ipv4 show excludedportrange protocol=tcp). Then start again.`
+            `[extension] Error: port ${sitePort} is forwarded to a DIFFERENT local port (${check.localPort}) on your PC.\n` +
+            `OAuth login callbacks go to ${scheme}://${host}:${sitePort} on your PC and would not reach the emulator, so it has been stopped.\n` +
+            `To fix:\n` +
+            `  1. Open the PORTS panel (bottom panel, next to TERMINAL), right-click the entry for port ${sitePort} and select "Stop Forwarding Port".\n` +
+            `  2. Quit the app on your PC that is using port ${sitePort} — or change the "easyauth.site.port" setting to a free port.\n` +
+            `     (On Windows the port may also be reserved by Hyper-V/WSL even when it looks free — check with: netsh interface ipv4 show excludedportrange protocol=tcp)\n` +
+            `  3. Start the emulator again.`
         );
         await this.stop();
         this.setState('error');
         void vscode.window.showErrorMessage(
-            `EasyAuth: port ${sitePort} forwards to a different local port (${check.localPort}) on this machine, ` +
-            `so OAuth login would fail — the emulator has been stopped. Check the Ports panel for a stale ` +
-            `forwarded-port entry, or free local port ${sitePort}.`,
+            `EasyAuth: emulator stopped — port ${sitePort} is forwarded to a different local port (${check.localPort}), ` +
+            `so OAuth login would fail. Fix: 1) In the PORTS panel, stop forwarding port ${sitePort}. ` +
+            `2) Quit the app using port ${sitePort} on your PC, or change the easyauth.site.port setting. ` +
+            `3) Start the emulator again.`,
             'Open Output'
         ).then((sel) => {
             if (sel === 'Open Output') {

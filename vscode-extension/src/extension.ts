@@ -350,9 +350,10 @@ export function activate(context: vscode.ExtensionContext): void {
             const check = await checkPortForwarding(port);
             if (!check.matches) {
                 void vscode.window.showErrorMessage(
-                    `EasyAuth: port ${port} forwards to a different local port (${check.localPort}) on this machine, ` +
-                    `so OAuth login would fail there. Check the Ports panel for a stale forwarded-port entry, ` +
-                    `or free local port ${port} (or change easyauth.site.port).`
+                    `EasyAuth: cannot open the browser — port ${port} is forwarded to a different local port ` +
+                    `(${check.localPort}), so OAuth login would fail. Fix: 1) In the PORTS panel, stop forwarding ` +
+                    `port ${port}. 2) Quit the app using port ${port} on your PC, or change the easyauth.site.port ` +
+                    `setting. Then try again.`
                 );
                 return;
             }
