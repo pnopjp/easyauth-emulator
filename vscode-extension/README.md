@@ -32,6 +32,7 @@ The extension auto-detects your app's listening port from `launch.json`, framewo
 - **Secure credential storage** — client secrets are stored in the OS keychain, never in settings files
 - **Custom OIDC providers** — add any OIDC-compatible provider via `easyauth.customIdps`
 - **Status bar indicator** — click to interact with the emulator based on its current state (start, stop, or open logs)
+- **Private browser launch** — set `easyauth.privateBrowser.command` to get a button that opens the gateway URL in a private/incognito window (in remote sessions the button copies the URL to the clipboard instead)
 
 ---
 
@@ -70,7 +71,7 @@ Add the following redirect URI in your identity provider's app registration:
 http://localhost:8080/oauth2/callback
 ```
 
-If you changed `easyauth.site.port`, use that port instead.
+If you changed `easyauth.site.port`, use that port instead. If you also access the gateway through another origin (e.g. a forwarded tunnel domain), register that origin's `/oauth2/callback` as well — one entry per origin.
 
 > **GitHub and Facebook** have additional setup requirements. See [GitHub Provider Notes](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#github-provider-notes) and [Facebook Provider Notes](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#facebook-provider-notes) in the configuration reference.
 
@@ -100,6 +101,21 @@ The status bar item in the bottom-left corner shows the emulator state at a glan
 
 ---
 
+## Explorer View
+
+An **EasyAuth Emulator** view appears in the **Explorer** panel. It shows the same state as the status bar, and the view title bar offers actions matching the current state:
+
+| State | Buttons shown |
+| --- | --- |
+| Not configured | Open Settings |
+| Client secret not set | Set Client Secret |
+| Stopped / error | Start |
+| Starting / running | Restart, Stop |
+| Starting / running / error | Open Output |
+| Running | Open in Browser, Open in Private Browser (when configured; in remote sessions, Copy URL for Private Browser) |
+
+---
+
 ## Commands
 
 All commands are available from the Command Palette (`Ctrl`+`Shift`+`P`):
@@ -111,6 +127,8 @@ All commands are available from the Command Palette (`Ctrl`+`Shift`+`P`):
 | `EasyAuth Emulator: Restart` | Restart the emulator (picks up config changes) |
 | `EasyAuth Emulator: Open Output` | Open the log output channel |
 | `EasyAuth Emulator: Open in Browser` | Open the gateway URL in the browser |
+| `EasyAuth Emulator: Open in Private Browser` | Open the gateway URL in a private/incognito window (shown when `easyauth.privateBrowser.command` is set). In remote sessions the URL is copied to the clipboard instead — a browser cannot be launched on your local PC from the remote host |
+| `EasyAuth Emulator: Copy URL for Private Browser` | Copy the gateway URL to the clipboard (shown instead of "Open in Private Browser" in remote sessions) |
 | `EasyAuth Emulator: Set Client Secret` | Store a client secret in the OS keychain |
 | `EasyAuth Emulator: Clear Client Secret` | Remove a stored client secret |
 
@@ -191,13 +209,14 @@ The extension always passes `--config .vscode/easyauth.toml` to the emulator on 
 | `easyauth.portScanMax` | `5` | Ports to scan during auto-detection |
 | `easyauth.portScanBase` | `null` | Base port for scanning; `null` = use first hint found |
 | `easyauth.verbose` | `false` | Log all resolved configuration values on startup |
+| `easyauth.privateBrowser.command` | `""` | Command that launches a private/incognito browser window; the site URL is appended as the last argument (e.g. `msedge --inprivate`, `chrome --incognito`, `firefox --private-window`). Empty hides the button. Not used in remote sessions (the button copies the URL to the clipboard instead) |
 
 ### Gateway
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `easyauth.site.url` | `http://localhost` | Public base URL (used to build the OAuth2 callback URL) |
-| `easyauth.site.port` | `8080` | Public port of the EasyAuth gateway |
+| `easyauth.site.url` | `http://localhost` | Usually no change needed. Set an `https://` value only if a TLS-terminating front end (reverse proxy) does not send `X-Forwarded-Proto` |
+| `easyauth.site.port` | `8080` | Listen port of the EasyAuth gateway (also the public port when accessed directly) |
 | `easyauth.tls.certFile` | `""` | Path to the TLS certificate file (PEM). Set with `tls.keyFile` to enable HTTPS. Required for Facebook Login. |
 | `easyauth.tls.keyFile` | `""` | Path to the TLS private key file (PEM). Set with `tls.certFile` to enable HTTPS. Required for Facebook Login. |
 | `easyauth.defaultIdp` | `""` | Default IdP when `/.auth/login` is accessed |
@@ -267,13 +286,13 @@ Microsoft Entra ID's client ID and secret are configured, but the OIDC Issuer UR
 
 ### Login fails — redirect URI mismatch (`AADSTS50011` or similar)
 
-Register the following redirect URI in your IdP's app registration:
+The callback URL follows the origin shown in your browser's address bar. Register the matching redirect URI in your IdP's app registration:
 
 ```text
-http://localhost:8080/oauth2/callback
+<origin the browser uses>/oauth2/callback
 ```
 
-If you changed `easyauth.site.port`, use that port number instead.
+For example `http://localhost:8080/oauth2/callback` (or with the port set in `easyauth.site.port`). Register one entry per origin you use.
 
 ### Login fails — `invalid_client`
 
@@ -322,10 +341,37 @@ For additional troubleshooting topics — including oauth2-proxy error diagnosis
 
 ---
 
+## Remote Development
+
+The extension and the emulator run on the remote host in both cases.
+
+### Remote - SSH
+
+Works with the default settings. The gateway is reached via `http://localhost:<site.port>` through VS Code port forwarding.
+
+### Remote - Tunnels
+
+The gateway is exposed through a forwarded tunnel URL (e.g. `https://xxxxxxxx-8080.usw2.devtunnels.ms`) instead of `localhost`. To sign in:
+
+1. Find the forwarded URL — start a debug session (or the emulator) once; the URL is shown in the EasyAuth Emulator output and in the notification when you click **Open in Browser**.
+2. Add `<forwarded URL>/oauth2/callback` to your IdP app registration's redirect URIs.
+
+The forwarded URL stays the same while the tunnel exists, but changes when the tunnel is re-created — e.g. after `code tunnel unregister`, or when an unused tunnel expires (by default after 30 days of inactivity). Update the IdP redirect URI when that happens. See ["When are unused dev tunnels deleted?" in the dev tunnels FAQ](https://learn.microsoft.com/azure/developer/dev-tunnels/faq#when-are-unused-dev-tunnels-deleted) for tunnel lifetime details.
+
+Dev tunnels allow at most 10 forwarded ports per tunnel, while VS Code automatically forwards every listening port it detects. This includes the emulator's internal oauth2-proxy ports (4180, 4181, …), which never need forwarding, so the limit can be exhausted quickly. Exclude the internal ports from auto-forwarding:
+
+```jsonc
+// .vscode/settings.json
+"remote.portsAttributes": {
+  "4180-4189": { "onAutoForward": "ignore" }
+}
+```
+
+---
+
 ## Known Limitations
 
 - `X-MS-TOKEN-AAD-EXPIRES-ON` and `X-MS-TOKEN-AAD-REFRESH-TOKEN` headers are not implemented
-- Remote - SSH and Remote - Tunnels extensions have not been tested
 - This is a development tool, not a byte-for-byte replica of Azure Easy Auth
 
 ---

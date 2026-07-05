@@ -87,6 +87,7 @@ def _configure_ssl(ca_bundle: str) -> None:
 
 
 _proc_stderr: dict[int, object] = {}  # pid → captured stderr (shown only on unexpected exit)
+_proc_label: dict[int, str] = {}  # pid → human-readable name shown on unexpected exit
 
 # ---------------------------------------------------------------------------
 # Child-process lifetime management
@@ -324,7 +325,7 @@ _IDP_DEFAULT_KIND: dict[str, str] = {
 
 
 def _process_idp(env: dict, idp: str, port: int,
-                 base_site_url: str, whitelist_domain: str) -> dict:
+                 whitelist_domain: str) -> dict:
     """Validate one IDP entry and return its oauth2-proxy launch args."""
     up_idp = idp.upper().replace("-", "_")
     pfx = f"IDP_{up_idp}"
@@ -364,7 +365,14 @@ def _process_idp(env: dict, idp: str, port: int,
 
     cookie_secret = _get(env, "OAUTH2_PROXY_COOKIE_SECRET")
     cookie_secure = _get(env, "OAUTH2_PROXY_COOKIE_SECURE", "false")
-    redirect_url  = f"{base_site_url}/oauth2/callback"
+    # Path-only redirect URL: oauth2-proxy fills in the scheme and host from
+    # X-Forwarded-Proto / X-Forwarded-Host on each request (reverse-proxy mode
+    # with a trusted proxy — both configured below), so the OAuth callback
+    # follows whatever origin the browser used (localhost, a forwarded port,
+    # a tunnel domain, ...) as long as that origin is registered with the IdP.
+    # This mirrors real Azure Easy Auth, which derives the callback URL from
+    # the incoming request host.
+    redirect_url  = "/oauth2/callback"
     cookie_name   = f"_oauth2_proxy_{idp}"
 
     args = [
@@ -791,8 +799,16 @@ def main() -> None:
     else:
         _die("SITE_URL must start with http:// or https://")
 
+    tls_cert = _get(env, "TLS_CERT_FILE", "").strip()
+    tls_key  = _get(env, "TLS_KEY_FILE",  "").strip()
+    tls_enabled = bool(tls_cert and tls_key)
+
     site_host = site_host.split("/")[0]
-    if site_port == default_port:
+    # An https SITE_URL without local TLS files means a TLS-terminating front
+    # end (tunnel domain, reverse proxy) serves the public origin on its own
+    # port — SITE_PORT is only the local listen port then, not public.
+    behind_tls_front = site_url.startswith("https://") and not tls_enabled
+    if site_port == default_port or behind_tls_front:
         base_site_url     = site_url
         default_whitelist = site_host
     else:
@@ -802,9 +818,6 @@ def main() -> None:
     whitelist_domain = _get(env, "OAUTH2_PROXY_WHITELIST_DOMAIN", default_whitelist)
 
     # ---- TLS certificate validation ----------------------------------------
-    tls_cert = _get(env, "TLS_CERT_FILE", "").strip()
-    tls_key  = _get(env, "TLS_KEY_FILE",  "").strip()
-    tls_enabled = bool(tls_cert and tls_key)
 
     if tls_enabled:
         if not Path(tls_cert).exists():
@@ -845,7 +858,7 @@ def main() -> None:
             _die(f"Invalid IDP name in IDP_LIST: {idp!r}")
 
         port = PORT_BASE + i
-        cfg  = _process_idp(env, idp, port, base_site_url, whitelist_domain)
+        cfg  = _process_idp(env, idp, port, whitelist_domain)
         for ip in trusted_proxy_ips:
             cfg["args"].append(f"--trusted-proxy-ip={ip}")
         idp_configs.append((idp, cfg))
@@ -900,6 +913,7 @@ def main() -> None:
                 preexec_fn=_PREEXEC_FN,
             )
         _proc_stderr[proc.pid] = stderr_cap
+        _proc_label[proc.pid] = f"oauth2-proxy ({idp})"
         _processes.append(proc)
         _assign_to_job(proc)
 
@@ -912,6 +926,7 @@ def main() -> None:
         app_extra_args = ["--config", str(config_file)]
     print(f"[start] Starting app.py on port {site_port}")
     app_proc = _spawn_python_script(APP_PY, _APP_CHILD_FLAG, child_env or None, app_extra_args or None)
+    _proc_label[app_proc.pid] = "app.py"
     _processes.append(app_proc)
     _assign_to_job(app_proc)
 
@@ -919,6 +934,7 @@ def main() -> None:
     if SAMPLE_APP_PY.exists() and sample_app_enabled:
         print(f"[start] Starting sample_app.py on port {sample_app_port}")
         sample_proc = _spawn_python_script(SAMPLE_APP_PY, _SAMPLE_APP_CHILD_FLAG)
+        _proc_label[sample_proc.pid] = "sample_app.py"
         _processes.append(sample_proc)
         _assign_to_job(sample_proc)
 
@@ -929,7 +945,7 @@ def main() -> None:
             for proc in _processes:
                 ret = proc.poll()
                 if ret is not None:
-                    name = Path(proc.args[0]).name if proc.args else "process"
+                    name = _proc_label.get(proc.pid) or (Path(proc.args[0]).name if proc.args else "process")
                     print(f"[start] {name} exited unexpectedly (code {ret})", file=sys.stderr)
                     cap = _proc_stderr.get(proc.pid)
                     if cap is not None:

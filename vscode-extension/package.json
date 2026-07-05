@@ -90,7 +90,7 @@
             "type": "string",
             "default": "",
             "order": 7,
-            "markdownDescription": "Command to launch a private/incognito browser window. The site URL is appended as the last argument.\n\n**Examples:**\n- `msedge --inprivate`\n- `chrome --incognito`\n- `firefox --private-window`\n\nLeave empty to hide the private browser button."
+            "markdownDescription": "Command to launch a private/incognito browser window. The site URL is appended as the last argument.\n\n**Examples:**\n- `msedge --inprivate`\n- `chrome --incognito`\n- `firefox --private-window`\n\nLeave empty to hide the private browser button.\n\n**Not used in remote sessions** (Remote - SSH / Tunnels): a browser cannot be launched on your local PC from the remote host, so the buttons copy the URL to the clipboard instead."
           }
         }
       },
@@ -103,14 +103,14 @@
             "default": "http://localhost",
             "scope": "resource",
             "order": 1,
-            "markdownDescription": "`SITE_URL`: Public base URL of the EasyAuth gateway (without trailing slash). Used to construct the OAuth2 callback URL."
+            "markdownDescription": "`SITE_URL`: Fallback base URL of the EasyAuth gateway, used when a request carries no Host header (without trailing slash). Usually no change needed. Set an `https://` value only if a TLS-terminating front end (reverse proxy) does not send `X-Forwarded-Proto` — the dev tunnels edge sends it, so Remote - Tunnels needs no change."
           },
           "easyauth.site.port": {
             "type": "number",
             "default": 8080,
             "scope": "resource",
             "order": 2,
-            "markdownDescription": "`SITE_PORT`: Public port of the EasyAuth gateway."
+            "markdownDescription": "`SITE_PORT`: Listen port of the EasyAuth gateway (also the public port when accessed directly)."
           },
           "easyauth.tls.certFile": {
             "type": "string",
@@ -591,7 +591,12 @@
         },
         {
           "command": "easyauth.openInPrivateBrowser",
-          "when": "view == easyauth.statusView && easyauth.state == running && easyauth.privateBrowserConfigured",
+          "when": "view == easyauth.statusView && easyauth.state == running && easyauth.privateBrowserConfigured && !easyauth.isRemote",
+          "group": "navigation"
+        },
+        {
+          "command": "easyauth.copyPrivateBrowserUrl",
+          "when": "view == easyauth.statusView && easyauth.state == running && easyauth.isRemote",
           "group": "navigation"
         },
         {
@@ -637,7 +642,12 @@
         },
         {
           "command": "easyauth.idp.openInPrivateBrowser",
-          "when": "view == easyauth.statusView && viewItem == easyauth.idp && easyauth.privateBrowserConfigured",
+          "when": "view == easyauth.statusView && viewItem == easyauth.idp && easyauth.privateBrowserConfigured && !easyauth.isRemote",
+          "group": "inline@2"
+        },
+        {
+          "command": "easyauth.idp.copyPrivateBrowserUrl",
+          "when": "view == easyauth.statusView && viewItem == easyauth.idp && easyauth.isRemote",
           "group": "inline@2"
         }
       ]
@@ -686,6 +696,20 @@
         "category": "EasyAuth Emulator",
         "title": "Open in Private Browser",
         "icon": "$(eye-closed)"
+      },
+      {
+        "command": "easyauth.copyPrivateBrowserUrl",
+        "category": "EasyAuth Emulator",
+        "title": "Copy URL for Private Browser",
+        "shortTitle": "Copy Private URL",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "easyauth.idp.copyPrivateBrowserUrl",
+        "category": "EasyAuth Emulator",
+        "title": "Copy IDP Login URL for Private Browser",
+        "shortTitle": "Copy Private URL",
+        "icon": "$(copy)"
       },
       {
         "command": "easyauth.setSecret",

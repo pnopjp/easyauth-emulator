@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { StatusBarManager, EmulatorState } from './statusBar';
 import { SecretManager } from './secretManager';
+import { checkPortForwarding, forwardingCheckApplies, getSiteOrigin } from './portForwarding';
 
 const STARTUP_TIMEOUT_MS = 30_000;
 const STARTED_MARKER = 'All processes started';
@@ -105,6 +106,7 @@ export class EmulatorManager implements vscode.Disposable {
                     if (this.state === 'starting' && line.includes(STARTED_MARKER)) {
                         this.clearStartTimeout();
                         this.setState('running');
+                        void this.verifyPortForwarding();
                     }
                 }
             });
@@ -206,6 +208,88 @@ export class EmulatorManager implements vscode.Disposable {
         const listenPort = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
         this.statusBar.update(state, listenPort, this.currentPort);
         this._onDidChangeState.fire(state);
+    }
+
+    /**
+     * In a remote session, new OAuth logins only work when VS Code forwards
+     * site.port to the same local port on the client (the IdP redirects the
+     * browser to http://localhost:<site.port>). Only the confirmed-broken case
+     * (a loopback forward on a different port) stops the emulator; forwarded
+     * domain URLs (Remote - Tunnels / Codespaces web) and unrecognized results
+     * are logged as warnings instead so unknown environments are not killed
+     * by a false positive.
+     */
+    private async verifyPortForwarding(): Promise<void> {
+        if (!forwardingCheckApplies()) return;
+        const sitePort = vscode.workspace.getConfiguration('easyauth').get<number>('site.port', 8080);
+        let check;
+        try {
+            check = await checkPortForwarding(sitePort);
+        } catch (err) {
+            this.outputChannel.warn(`[extension] Port forwarding check failed: ${err}`);
+            return;
+        }
+        // State may have changed while awaiting (e.g. stopped by the user)
+        if (this.state !== 'running') return;
+
+        switch (check.kind) {
+            case 'match':
+                if (vscode.env.remoteName === 'tunnel') {
+                    // In Remote - Tunnels, asExternalUri may return the URI
+                    // unchanged when the port is not (yet) forwarded, so a
+                    // 'match' proves nothing about client-side reachability.
+                    this.outputChannel.info(
+                        `[extension] Port forwarding check is inconclusive in Remote - Tunnels — ` +
+                        `access the gateway through the forwarded tunnel URL (see the PORTS panel).`
+                    );
+                } else {
+                    this.outputChannel.info(
+                        `[extension] Port forwarding OK: http://localhost:${sitePort} on your PC reaches the emulator.`
+                    );
+                }
+                return;
+            case 'external-domain': {
+                const origin = `${check.externalUri.scheme}://${check.externalUri.authority}`;
+                this.outputChannel.info(
+                    `[extension] This environment exposes the emulator through a forwarded URL: ${origin}\n` +
+                    `To sign in there, add ${origin}/oauth2/callback to your IdP app registration's redirect URIs.\n` +
+                    `Note: http://localhost:${sitePort} on your PC is NOT forwarded in this environment (unlike Remote - SSH).`
+                );
+                return;
+            }
+            case 'unknown':
+                this.outputChannel.warn(
+                    `[extension] Could not interpret the forwarded address for port ${sitePort}: ` +
+                    `${check.externalUri.toString(true)} — skipping the port forwarding check.`
+                );
+                return;
+            case 'mismatch':
+                break;
+        }
+
+        const { scheme, host } = getSiteOrigin();
+        this.outputChannelError(
+            `[extension] Error: port ${sitePort} is forwarded to a DIFFERENT local port (${check.localPort}) on your PC.\n` +
+            `OAuth login callbacks go to ${scheme}://${host}:${sitePort} on your PC and would not reach the emulator, so it has been stopped.\n` +
+            `To fix:\n` +
+            `  1. Open the PORTS panel (bottom panel, next to TERMINAL), right-click the entry for port ${sitePort} and select "Stop Forwarding Port".\n` +
+            `  2. Quit the app on your PC that is using port ${sitePort} — or change the "easyauth.site.port" setting to a free port.\n` +
+            `     (On Windows the port may also be reserved by Hyper-V/WSL even when it looks free — check with: netsh interface ipv4 show excludedportrange protocol=tcp)\n` +
+            `  3. Start the emulator again.`
+        );
+        await this.stop();
+        this.setState('error');
+        void vscode.window.showErrorMessage(
+            `EasyAuth: emulator stopped — port ${sitePort} is forwarded to a different local port (${check.localPort}), ` +
+            `so OAuth login would fail. Fix: 1) In the PORTS panel, stop forwarding port ${sitePort}. ` +
+            `2) Quit the app using port ${sitePort} on your PC, or change the easyauth.site.port setting. ` +
+            `3) Start the emulator again.`,
+            'Open Output'
+        ).then((sel) => {
+            if (sel === 'Open Output') {
+                this.outputChannel.show();
+            }
+        });
     }
 
     private clearStartTimeout(): void {

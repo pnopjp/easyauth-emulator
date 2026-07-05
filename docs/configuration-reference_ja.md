@@ -22,8 +22,8 @@
 | --- | :---: | --- | --- |
 | `IDP_LIST` | ✓ | — | 有効にする IdP 名をカンマ区切りで列挙（例: `entra,google`）。順序は選択画面の表示順。 |
 | `DEFAULT_IDP` | | — | 未認証時に使用する既定 IdP。`IDP_LIST` に含まれる値を指定。未設定時の挙動は下記参照。 |
-| `SITE_URL` | | `http://localhost` | このゲートウェイの公開 URL（末尾スラッシュなし）。OAuth2 callback URL の構築に使用。 |
-| `SITE_PORT` | | `8080` | このゲートウェイの公開ポート。`SITE_URL` とともにゲートウェイのベース URL を形成する。 |
+| `SITE_URL` | | `http://localhost` | リクエストに `Host` ヘッダーがない場合に使われるフォールバック URL（末尾スラッシュなし）。通常は変更不要。TLS 終端するフロント（リバースプロキシ）が `X-Forwarded-Proto` を送らない場合のみ `https://` の値を設定（dev tunnels は送る）。 |
+| `SITE_PORT` | | `8080` | このゲートウェイのリッスンポート（直接アクセスする場合は公開ポートを兼ねる）。 |
 | `APP_UPSTREAM` | | `http://localhost:8081` ※ | 認証済みリクエストの転送先 URL。自分のアプリを使う場合はそのアプリの URL を設定してください。 |
 | `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | `GET /.debug/headers` 診断エンドポイントを有効化するか。有効時はその URL でエミュレーターが受け取り計算したヘッダーを確認できる。既定では無効（`404` を返す）。 |
 | `SKIP_AUTH_ROUTES` | | — | 認証をスキップしてアップストリームへ直接転送するルート。形式: リクエストパスにマッチする `[METHOD=]REGEX` パターンをカンマ区切りで列挙。例: `GET=^/health$,^/public/`。転送前に認証ヘッダーは除去される。 |
@@ -201,13 +201,13 @@ openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
 
 ### IdP リダイレクト後にログインが失敗する（`AADSTS50011`）
 
-リダイレクト URI の不一致です。IdP のアプリ登録（Authentication）のリダイレクト URI を次と一致させてください:
+リダイレクト URI の不一致です。callback URL はブラウザのアドレスバーに表示されている origin に追従します。IdP のアプリ登録（Authentication）のリダイレクト URI を次と一致させてください:
 
 ```text
-<SITE_URL>:<SITE_PORT>/oauth2/callback
+<ブラウザがアクセスしている origin>/oauth2/callback
 ```
 
-例: `http://localhost:8080/oauth2/callback`
+例: `http://localhost:8080/oauth2/callback`、転送ドメイン経由なら `https://xxx-8080.usw2.devtunnels.ms/oauth2/callback`。使用する origin ごとに 1 件ずつ登録してください。
 
 ### アプリに到達できない（502 エラー）
 

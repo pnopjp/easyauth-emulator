@@ -124,10 +124,10 @@ IDP_ENTRA_CLIENT_SECRET=<クライアントシークレット>
 IdP のアプリ登録に OAuth2 コールバック URL を登録します:
 
 ```text
-http://<SITE_URL のホスト>:<SITE_PORT>/oauth2/callback
+http://localhost:8080/oauth2/callback
 ```
 
-例: `http://localhost:8080/oauth2/callback`
+ポート番号は `SITE_PORT` に合わせてください。別の origin（転送トンネルドメインなど）経由でもアクセスする場合は、その origin の `/oauth2/callback` も登録してください（使用する origin ごとに 1 件）。
 
 ## 利用方法
 
