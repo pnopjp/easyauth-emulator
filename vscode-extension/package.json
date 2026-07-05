@@ -103,7 +103,7 @@
             "default": "http://localhost",
             "scope": "resource",
             "order": 1,
-            "markdownDescription": "`SITE_URL`: Fallback base URL of the EasyAuth gateway, used when a request carries no Host header (without trailing slash). Usually no change needed. Set an `https://` value when the gateway sits behind a TLS-terminating front end (tunnel domain, reverse proxy)."
+            "markdownDescription": "`SITE_URL`: Fallback base URL of the EasyAuth gateway, used when a request carries no Host header (without trailing slash). Usually no change needed. Set an `https://` value only if a TLS-terminating front end (reverse proxy) does not send `X-Forwarded-Proto` — the dev tunnels edge sends it, so Remote - Tunnels needs no change."
           },
           "easyauth.site.port": {
             "type": "number",

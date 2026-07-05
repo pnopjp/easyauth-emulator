@@ -386,8 +386,7 @@ export function activate(context: vscode.ExtensionContext): void {
                     const origin = `${check.externalUri.scheme}://${check.externalUri.authority}`;
                     void vscode.window.showWarningMessage(
                         `EasyAuth: using the forwarded URL ${origin}. To sign in there, add ` +
-                        `${origin}/oauth2/callback to your IdP app registration's redirect URIs and set ` +
-                        `easyauth.site.url to ${origin}.`
+                        `${origin}/oauth2/callback to your IdP app registration's redirect URIs.`
                     );
                     return check.externalUri.with({
                         path: check.externalUri.path.replace(/\/$/, '') + urlPath,

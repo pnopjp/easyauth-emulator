@@ -200,7 +200,7 @@ The extension always passes `--config .vscode/easyauth.toml` to the emulator on 
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `easyauth.site.url` | `http://localhost` | Usually no change needed. Set an `https://` value when the gateway sits behind a TLS-terminating front end (tunnel domain, reverse proxy) |
+| `easyauth.site.url` | `http://localhost` | Usually no change needed. Set an `https://` value only if a TLS-terminating front end (reverse proxy) does not send `X-Forwarded-Proto` |
 | `easyauth.site.port` | `8080` | Listen port of the EasyAuth gateway (also the public port when accessed directly) |
 | `easyauth.tls.certFile` | `""` | Path to the TLS certificate file (PEM). Set with `tls.keyFile` to enable HTTPS. Required for Facebook Login. |
 | `easyauth.tls.keyFile` | `""` | Path to the TLS private key file (PEM). Set with `tls.certFile` to enable HTTPS. Required for Facebook Login. |
@@ -339,12 +339,18 @@ Works with the default settings. The gateway is reached via `http://localhost:<s
 The gateway is exposed through a forwarded tunnel URL (e.g. `https://xxxxxxxx-8080.usw2.devtunnels.ms`) instead of `localhost`. To sign in:
 
 1. Find the forwarded URL — start a debug session (or the emulator) once; the URL is shown in the EasyAuth Emulator output and in the notification when you click **Open in Browser**.
-2. Set `easyauth.site.url` to that URL (origin only, no trailing slash).
-3. Add `<forwarded URL>/oauth2/callback` to your IdP app registration's redirect URIs.
+2. Add `<forwarded URL>/oauth2/callback` to your IdP app registration's redirect URIs.
 
-The forwarded URL stays the same while the tunnel exists, but changes when the tunnel is re-created — e.g. after `code tunnel unregister`, or when an unused tunnel expires (by default after 30 days of inactivity). Update `easyauth.site.url` and the IdP redirect URI when that happens. See ["When are unused dev tunnels deleted?" in the dev tunnels FAQ](https://learn.microsoft.com/azure/developer/dev-tunnels/faq#when-are-unused-dev-tunnels-deleted) for tunnel lifetime details.
+The forwarded URL stays the same while the tunnel exists, but changes when the tunnel is re-created — e.g. after `code tunnel unregister`, or when an unused tunnel expires (by default after 30 days of inactivity). Update the IdP redirect URI when that happens. See ["When are unused dev tunnels deleted?" in the dev tunnels FAQ](https://learn.microsoft.com/azure/developer/dev-tunnels/faq#when-are-unused-dev-tunnels-deleted) for tunnel lifetime details.
 
-When you switch the same workspace back to Remote - SSH or local development, reset `easyauth.site.url` to the default (`http://localhost`).
+Dev tunnels allow at most 10 forwarded ports per tunnel, while VS Code automatically forwards every listening port it detects. This includes the emulator's internal oauth2-proxy ports (4180, 4181, …), which never need forwarding, so the limit can be exhausted quickly. Exclude the internal ports from auto-forwarding:
+
+```jsonc
+// .vscode/settings.json
+"remote.portsAttributes": {
+  "4180-4189": { "onAutoForward": "ignore" }
+}
+```
 
 ---
 

@@ -22,7 +22,7 @@ Security note:
 | --- | :---: | --- | --- |
 | `IDP_LIST` | ✓ | — | Comma-separated IDP names to enable (e.g. `entra,google`). Order controls the selection page display order. |
 | `DEFAULT_IDP` | | — | Default IDP when no session or selection cookie is present. Must be one of the `IDP_LIST` values. See default selection behavior below. |
-| `SITE_URL` | | `http://localhost` | Fallback base URL used when a request carries no `Host` header (without a trailing slash). Usually no change needed. Set an `https://` value when the gateway sits behind a TLS-terminating front end (tunnel domain, reverse proxy). |
+| `SITE_URL` | | `http://localhost` | Fallback base URL used when a request carries no `Host` header (without a trailing slash). Usually no change needed. Set an `https://` value only if a TLS-terminating front end (reverse proxy) does not send `X-Forwarded-Proto` — the dev tunnels edge sends it. |
 | `SITE_PORT` | | `8080` | Listen port of this gateway (also the public port when accessed directly). |
 | `APP_UPSTREAM` | | `http://localhost:8081` ※ | URL that authenticated requests are forwarded to. Set to your application's URL when using your own app. |
 | `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | Enables the `GET /.debug/headers` diagnostic endpoint. When enabled, that URL shows the headers the emulator receives and computes. Disabled by default — returns `404`. |

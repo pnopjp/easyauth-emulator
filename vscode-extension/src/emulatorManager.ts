@@ -234,17 +234,25 @@ export class EmulatorManager implements vscode.Disposable {
 
         switch (check.kind) {
             case 'match':
-                this.outputChannel.info(
-                    `[extension] Port forwarding OK: http://localhost:${sitePort} on your PC reaches the emulator.`
-                );
+                if (vscode.env.remoteName === 'tunnel') {
+                    // In Remote - Tunnels, asExternalUri may return the URI
+                    // unchanged when the port is not (yet) forwarded, so a
+                    // 'match' proves nothing about client-side reachability.
+                    this.outputChannel.info(
+                        `[extension] Port forwarding check is inconclusive in Remote - Tunnels — ` +
+                        `access the gateway through the forwarded tunnel URL (see the PORTS panel).`
+                    );
+                } else {
+                    this.outputChannel.info(
+                        `[extension] Port forwarding OK: http://localhost:${sitePort} on your PC reaches the emulator.`
+                    );
+                }
                 return;
             case 'external-domain': {
                 const origin = `${check.externalUri.scheme}://${check.externalUri.authority}`;
                 this.outputChannel.warn(
                     `[extension] This environment exposes the emulator through a forwarded URL: ${origin}\n` +
-                    `The OAuth callback URL follows the origin the browser uses, so to sign in there:\n` +
-                    `  1. Add ${origin}/oauth2/callback to your IdP app registration's redirect URIs.\n` +
-                    `  2. Set "easyauth.site.url" to ${origin} (marks the gateway as behind an HTTPS front end).\n` +
+                    `To sign in there, add ${origin}/oauth2/callback to your IdP app registration's redirect URIs.\n` +
                     `Note: http://localhost:${sitePort} on your PC is NOT forwarded in this environment (unlike Remote - SSH).`
                 );
                 return;
