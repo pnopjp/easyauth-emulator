@@ -880,7 +880,20 @@ class _Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     port = int(SITE_PORT)
-    server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)
+    if sys.platform == "win32":
+        # On Windows, SO_REUSEADDR lets a second process bind an in-use port,
+        # silently splitting requests between two gateway instances (e.g. a
+        # stale emulator left over from a crashed session) — fail fast instead.
+        ThreadingHTTPServer.allow_reuse_address = False
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)
+    except OSError as exc:
+        print(
+            f"[app] ERROR: cannot listen on port {port}: {exc} — "
+            f"is another EasyAuth Emulator (or a stale instance) still running?",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if _TLS_ENABLED:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         try:
