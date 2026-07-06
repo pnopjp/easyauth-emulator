@@ -66,10 +66,11 @@ function getIconsMode(): string {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-    if (vscode.env.uiKind === vscode.UIKind.Web) {
-        void vscode.window.showErrorMessage('EasyAuth Emulator is not supported in VS Code for Web.');
-        return;
-    }
+    // No uiKind === Web guard here: this code only ever runs on a Node
+    // extension host (there is no browser entry point, so standalone
+    // vscode.dev cannot load the extension at all). When the UI is a web
+    // client (vscode.dev + Tunnels, Codespaces web), the extension runs on
+    // the remote host with full native access and works normally.
 
     const outputChannel = vscode.window.createOutputChannel('EasyAuth Emulator', { log: true });
     const statusBar = new StatusBarManager();
@@ -371,6 +372,28 @@ export function activate(context: vscode.ExtensionContext): void {
             const check = await checkPortForwarding(port);
             switch (check.kind) {
                 case 'match':
+                    if (vscode.env.remoteName === 'tunnel') {
+                        // In Remote - Tunnels the client has no localhost binding
+                        // for the gateway, and asExternalUri can echo the URI back
+                        // unchanged (observed on vscode.dev even with the port
+                        // forwarded) — there is no stable API to obtain the
+                        // forwarded tunnel URL, so guide to the PORTS panel
+                        // instead of opening a URL that cannot work.
+                        void vscode.window.showWarningMessage(
+                            `EasyAuth: the forwarded URL cannot be determined in this session. ` +
+                            `Open the PORTS panel and use the forwarded address for port ${port}.`,
+                            'Open PORTS Panel'
+                        ).then((sel) => {
+                            if (sel === 'Open PORTS Panel') {
+                                // Auto-generated focus command for the Ports view;
+                                // the view id is not public API, so ignore failures —
+                                // the message already says where to look.
+                                vscode.commands.executeCommand('~remote.forwardedPorts.focus')
+                                    .then(undefined, () => undefined);
+                            }
+                        });
+                        return null;
+                    }
                     return targetUri;
                 case 'mismatch':
                     void vscode.window.showErrorMessage(

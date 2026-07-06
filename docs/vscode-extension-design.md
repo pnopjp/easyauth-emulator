@@ -288,7 +288,7 @@ The config file format is `config.toml`.
 
 ## 8. Secret Management
 
-Client secrets and the cookie signing key are stored via the VS Code SecretStorage API in the platform's native secure store (OS keychain). This design avoids storing secrets as plaintext in `settings.json`.
+Client secrets and the cookie signing key are stored via the VS Code SecretStorage API on the client side — the platform's native secure store (OS keychain) in desktop VS Code, or the browser's storage in web clients (vscode.dev). Secrets never reach `settings.json` or the remote host; each client keeps its own store, so switching clients (e.g. desktop ⇔ vscode.dev) requires re-entering secrets.
 
 ### Storage Keys
 
