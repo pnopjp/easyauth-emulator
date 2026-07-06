@@ -29,7 +29,7 @@ The extension auto-detects your app's listening port from `launch.json`, framewo
 - **Azure service compatibility** — Azure App Service, Azure Functions, Azure Container Apps, and Azure Static Web Apps (partial)
 - **Auto-start / auto-stop** — emulator lifecycle is tied to your debug session
 - **Smart port detection** — reads `launch.json`, framework configs, and debug stdout; prompts you only as a last resort
-- **Secure credential storage** — client secrets are stored in the OS keychain, never in settings files
+- **Secure credential storage** — client secrets are stored client-side via VS Code's SecretStorage (the OS keychain in desktop VS Code), never in settings files
 - **Custom OIDC providers** — add any OIDC-compatible provider via `easyauth.customIdps`
 - **Status bar indicator** — click to interact with the emulator based on its current state (start, stop, or open logs)
 - **Private browser launch** — set `easyauth.privateBrowser.command` to get a button that opens the gateway URL in a private/incognito window (in remote sessions the button copies the URL to the clipboard instead)
@@ -61,7 +61,7 @@ Open your workspace settings (`Ctrl`+`,` → search `easyauth`) and fill in the 
 
 ### 2. Store the client secret
 
-Run **EasyAuth Emulator: Set Client Secret** from the Command Palette (`Ctrl`+`Shift`+`P`) and enter the client secret for the IdP you configured in step 1. The secret is stored in VS Code's SecretStorage API (backed by the OS keychain — Windows Credential Manager on Windows) — never in settings files.
+Run **EasyAuth Emulator: Set Client Secret** from the Command Palette (`Ctrl`+`Shift`+`P`) and enter the client secret for the IdP you configured in step 1. The secret is stored on the client via VS Code's SecretStorage API — the OS keychain in desktop VS Code (Windows Credential Manager on Windows), or the browser's storage in web clients (vscode.dev) — never in settings files or on a remote host. Each client keeps its own store, so you are asked to enter secrets again when switching clients (e.g. desktop VS Code ⇔ vscode.dev).
 
 ### 3. Register the callback URL
 
@@ -129,7 +129,7 @@ All commands are available from the Command Palette (`Ctrl`+`Shift`+`P`):
 | `EasyAuth Emulator: Open in Browser` | Open the gateway URL in the browser |
 | `EasyAuth Emulator: Open in Private Browser` | Open the gateway URL in a private/incognito window (shown when `easyauth.privateBrowser.command` is set). In remote sessions the URL is copied to the clipboard instead — a browser cannot be launched on your local PC from the remote host |
 | `EasyAuth Emulator: Copy URL for Private Browser` | Copy the gateway URL to the clipboard (shown instead of "Open in Private Browser" in remote sessions) |
-| `EasyAuth Emulator: Set Client Secret` | Store a client secret in the OS keychain |
+| `EasyAuth Emulator: Set Client Secret` | Store a client secret in VS Code's SecretStorage (client-side) |
 | `EasyAuth Emulator: Clear Client Secret` | Remove a stored client secret |
 
 ---
@@ -355,6 +355,8 @@ The gateway is exposed through a forwarded tunnel URL (e.g. `https://xxxxxxxx-80
 
 1. Find the forwarded URL — start a debug session (or the emulator) once; the URL is shown in the EasyAuth Emulator output and in the notification when you click **Open in Browser**.
 2. Add `<forwarded URL>/oauth2/callback` to your IdP app registration's redirect URIs.
+
+> **vscode.dev (browser client) + Tunnels** — **Open in Browser** and **Copy URL for Private Browser** are not supported and show a guidance message instead. Open the gateway from the forwarded address for the gateway port in the **PORTS** panel.
 
 The forwarded URL stays the same while the tunnel exists, but changes when the tunnel is re-created — e.g. after `code tunnel unregister`, or when an unused tunnel expires (by default after 30 days of inactivity). Update the IdP redirect URI when that happens. See ["When are unused dev tunnels deleted?" in the dev tunnels FAQ](https://learn.microsoft.com/azure/developer/dev-tunnels/faq#when-are-unused-dev-tunnels-deleted) for tunnel lifetime details.
 

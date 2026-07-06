@@ -372,6 +372,28 @@ export function activate(context: vscode.ExtensionContext): void {
             const check = await checkPortForwarding(port);
             switch (check.kind) {
                 case 'match':
+                    if (vscode.env.remoteName === 'tunnel') {
+                        // In Remote - Tunnels the client has no localhost binding
+                        // for the gateway, and asExternalUri can echo the URI back
+                        // unchanged (observed on vscode.dev even with the port
+                        // forwarded) — there is no stable API to obtain the
+                        // forwarded tunnel URL, so guide to the PORTS panel
+                        // instead of opening a URL that cannot work.
+                        void vscode.window.showWarningMessage(
+                            `EasyAuth: the forwarded URL cannot be determined in this session. ` +
+                            `Open the PORTS panel and use the forwarded address for port ${port}.`,
+                            'Open PORTS Panel'
+                        ).then((sel) => {
+                            if (sel === 'Open PORTS Panel') {
+                                // Auto-generated focus command for the Ports view;
+                                // the view id is not public API, so ignore failures —
+                                // the message already says where to look.
+                                vscode.commands.executeCommand('~remote.forwardedPorts.focus')
+                                    .then(undefined, () => undefined);
+                            }
+                        });
+                        return null;
+                    }
                     return targetUri;
                 case 'mismatch':
                     void vscode.window.showErrorMessage(

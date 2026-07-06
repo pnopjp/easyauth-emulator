@@ -185,6 +185,9 @@ OAUTH2_PROXY_REQUEST_LOGGING = true    # リクエストごとの HTTP ログ
 - `/.auth/logout` は本エミュレーターおよび oauth2-proxy のセッションを必ず先に終了します。IdP 側ブラウザー SSO の終了はベストエフォートです。
 - ログインフローにはエミュレーター固有仕様（`/.auth/login/select`、`DEFAULT_IDP`、`IDP_LIST` 1件時の既定化）が含まれます。
 - セッション制御は oauth2-proxy の cookie と本エミュレーターのルーティング規則に基づくため、マネージド Easy Auth の内部挙動とは差分が出る場合があります。
+- WebSocket、gRPC には対応していません（HTTP/1.1 のリクエスト/レスポンス型プロキシのみ）。
+- Server-Sent Events (SSE) など、レスポンスをストリーミングするエンドポイントには対応していません。プロキシが upstream からの応答を全て読み切ってから返すため、応答が完了しないエンドポイントはハングします。
+- `Transfer-Encoding: chunked`（`Content-Length` なし）で送られたリクエストボディは、アプリケーションへ転送されません。
 
 ## 非対応プロバイダー
 

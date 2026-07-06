@@ -422,7 +422,7 @@
             "default": [],
             "scope": "resource",
             "order": 1,
-            "markdownDescription": "Custom OIDC providers (e.g. Auth0, Salesforce). Each entry is added to `IDP_LIST` and mapped to `IDP_<NAME>_*` environment variables, where `<NAME>` is the uppercased `name` field.\n\n**Required fields per entry:** `name`, `clientId`, `oidcIssuerUrl`\n\nClient secrets must be registered separately via the **EasyAuth Emulator: Set Client Secret** command (stored encrypted in the OS keychain).\n\n**Example:**\n```jsonc\n{\n  \"easyauth.customIdps\": [\n    {\n      \"name\": \"my-provider\",\n      \"displayName\": \"My Provider\",\n      \"clientId\": \"your-client-id\",\n      \"oidcIssuerUrl\": \"https://your-provider.example.com\"\n    }\n  ]\n}\n```",
+            "markdownDescription": "Custom OIDC providers (e.g. Auth0, Salesforce). Each entry is added to `IDP_LIST` and mapped to `IDP_<NAME>_*` environment variables, where `<NAME>` is the uppercased `name` field.\n\n**Required fields per entry:** `name`, `clientId`, `oidcIssuerUrl`\n\nClient secrets must be registered separately via the **EasyAuth Emulator: Set Client Secret** command (stored client-side via VS Code's SecretStorage).\n\n**Example:**\n```jsonc\n{\n  \"easyauth.customIdps\": [\n    {\n      \"name\": \"my-provider\",\n      \"displayName\": \"My Provider\",\n      \"clientId\": \"your-client-id\",\n      \"oidcIssuerUrl\": \"https://your-provider.example.com\"\n    }\n  ]\n}\n```",
             "items": {
               "type": "object",
               "required": [
