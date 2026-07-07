@@ -109,8 +109,8 @@ jobs:
 
       - name: Delete triggering tag
         run: |
-          echo "::notice::Deleting tag ${{ github.ref_name }} because THIRD_PARTY_LICENSES was out of date and the release did not complete. Re-tag once it's confirmed up to date."
-          git push origin --delete "${{ github.ref_name }}"
+          echo "::notice::Deleting tag $GITHUB_REF_NAME because THIRD_PARTY_LICENSES was out of date and the release did not complete. Re-tag once it's confirmed up to date."
+          git push origin --delete "$GITHUB_REF_NAME"
 
       - name: Stop release
         run: |
