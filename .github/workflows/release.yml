@@ -49,10 +49,11 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   # Human decision gate — only runs when licenses have changed
   # Requires a decision from the "license-review" environment:
-  #   Approve: regenerate THIRD_PARTY_LICENSES and push the fix to main
+  #   Approve: regenerate THIRD_PARTY_LICENSES and open a PR against main
+  #            (main is protected, so a direct push is not possible)
   #   Reject:  leave THIRD_PARTY_LICENSES untouched
   # Either way, the release stops here. The tag already points at a commit
-  # without the fix, so re-tag from the updated main to publish it.
+  # without the fix, so re-tag after the PR is merged to publish it.
   # ─────────────────────────────────────────────────────────────────────────
   update-licenses:
     name: Update THIRD_PARTY_LICENSES
@@ -62,6 +63,7 @@ jobs:
     environment: license-review
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@v6
@@ -80,13 +82,20 @@ jobs:
       - name: Regenerate THIRD_PARTY_LICENSES
         run: .venv/bin/python scripts/gen_licenses.py
 
-      - name: Commit and push to main
+      - name: Open PR with the update
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          BRANCH="chore/update-third-party-licenses-$GITHUB_RUN_ID"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
           git add THIRD_PARTY_LICENSES
           git commit -m "chore: update THIRD_PARTY_LICENSES"
-          git push origin main
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "chore: update THIRD_PARTY_LICENSES" \
+            --body "Triggered by the out-of-date check on tag \`$GITHUB_REF_NAME\`. Merge this, then re-tag to release."
 
   # ─────────────────────────────────────────────────────────────────────────
   # Delete the triggering tag — the release didn't happen either way
@@ -114,8 +123,8 @@ jobs:
 
       - name: Stop release
         run: |
-          echo "::notice::THIRD_PARTY_LICENSES was out of date and has been updated on main."
-          echo "::notice::This release is stopped. Push a new tag from the updated main to release."
+          echo "::notice::THIRD_PARTY_LICENSES was out of date. This release is stopped."
+          echo "::notice::If update-licenses opened a PR, merge it, then push a new tag to release."
 
   # ─────────────────────────────────────────────────────────────────────────
   # Build Python binary + package VSIX for each platform
