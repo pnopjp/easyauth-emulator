@@ -88,6 +88,30 @@ jobs:
           git commit -m "chore: update THIRD_PARTY_LICENSES"
           git push origin main
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # Delete the triggering tag — the release didn't happen either way
+  # (Approved: the fix landed on a new main commit, not this tag.
+  #  Rejected: nothing changed.) Runs regardless of update-licenses' outcome
+  # so the tag can be reused once THIRD_PARTY_LICENSES is confirmed current.
+  # ─────────────────────────────────────────────────────────────────────────
+  cleanup-tag:
+    name: Delete tag (release did not complete)
+    needs: [check-licenses, update-licenses]
+    if: |
+      always() &&
+      needs.check-licenses.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Delete triggering tag
+        run: |
+          echo "::notice::Deleting tag ${{ github.ref_name }} because THIRD_PARTY_LICENSES was out of date and the release did not complete. Re-tag once it's confirmed up to date."
+          git push origin --delete "${{ github.ref_name }}"
+
       - name: Stop release
         run: |
           echo "::notice::THIRD_PARTY_LICENSES was out of date and has been updated on main."
