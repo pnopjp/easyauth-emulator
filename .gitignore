@@ -8,4 +8,5 @@ __pycache__/
 __*/
 .cert/
 venv/
+.venv/
 ToDo.md

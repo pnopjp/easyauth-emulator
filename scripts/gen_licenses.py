@@ -8,6 +8,7 @@ Usage:
     python scripts/gen_licenses.py --check   # exit(1) if file is out of date
 """
 import argparse
+import difflib
 import importlib.metadata
 import sys
 from pathlib import Path
@@ -163,11 +164,19 @@ def main() -> None:
             sys.exit(1)
         current = OUTPUT.read_text(encoding="utf-8")
         if current != content:
+            diff = difflib.unified_diff(
+                current.splitlines(keepends=True),
+                content.splitlines(keepends=True),
+                fromfile=f"{OUTPUT.name} (current)",
+                tofile=f"{OUTPUT.name} (expected)",
+            )
             print(f"[gen_licenses] ERROR: {OUTPUT.name} is out of date. Run `python scripts/gen_licenses.py` and commit the result.", file=sys.stderr)
+            print(f"[gen_licenses] Diff:", file=sys.stderr)
+            sys.stderr.writelines(diff)
             sys.exit(1)
         print(f"[gen_licenses] {OUTPUT.name} is up to date.")
     else:
-        OUTPUT.write_text(content, encoding="utf-8")
+        OUTPUT.write_text(content, encoding="utf-8", newline="\n")
         print(f"[gen_licenses] Written: {OUTPUT}")
 
 
