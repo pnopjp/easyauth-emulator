@@ -38,6 +38,16 @@
   "extensionKind": [
     "workspace"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Spawns a native emulator process and reads workspace-level settings (e.g. easyauth.privateBrowser.command, .vscode/easyauth.toml) that influence command execution, including automatically on debug session start."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Requires spawning a native emulator process against the real local filesystem, which virtual workspaces cannot provide."
+    }
+  },
   "contributes": {
     "configuration": [
       {
