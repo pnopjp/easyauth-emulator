@@ -34,6 +34,10 @@ push v*.*.*
 `src/app.py` の純粋なロジック関数を対象とします。
 サブプロセス・HTTP 通信・外部サービスは一切不要です。
 
+`test_protocol_gaps.py` のみ例外で、ゲートウェイと `tests/protocol/` の検証用アプリを
+サブプロセスとして起動し、実際にHTTP経由でリクエストを送る統合テストです（詳細は下記
+「プロトコル欠落の回帰テスト」を参照）。
+
 ### テスト対象
 
 #### グループ A — 完全な純粋関数（環境依存なし）
@@ -58,6 +62,28 @@ push v*.*.*
 | `_idp_user_id_claim(idp)` | `src/app.py:217` | `entra` → `"preferred_username"`；`google` → `"email"`；`IDP_ENTRA_AUTH_USER_ID_CLAIM` でオーバーライド可能 |
 | `_idp_logout_endpoint(idp)` | `src/app.py:237` | 環境変数で明示指定された場合はそれを使用；`microsoft` kind かつ issuer が `/v2.0` 終端 → URL 自動導出；その他の kind → `""` |
 | `_build_provider_logout_url(idp, post_logout_redirect_uri)` | `src/app.py:249` | エンドポイント未設定 → `""`；相対リダイレクト URI は SITE\_URL + SITE\_PORT で絶対 URL 化；エンドポイントの既存クエリパラメータは保持される |
+
+### プロトコル欠落の回帰テスト（`test_protocol_gaps.py`）
+
+**依存パッケージ:** `requirements-test.txt`（`grpcio` 等。`requirements.txt` — 配布バイナリ用 — とは分離）
+
+`ToDo.md` に記載のプロトコル欠落（WebSocket・gRPC・SSE/ストリーミング・chunkedリクエスト
+ボディ）を、ゲートウェイ（`src/app.py`）と検証用アプリ（`tests/protocol/app.py`）を実際に
+サブプロセスとして起動して確認します。認証は `SKIP_AUTH_ROUTES` で迂回します — 認証済み
+経由でも迂回経由でも `_proxy_to` の呼び出しは同一コードパスのため、代替として妥当です。
+
+各テストは「正しく動く」ことをアサートし、`@pytest.mark.xfail(strict=True)` を付けています。
+現状は欠落しているため失敗（`XFAIL`）しますが、将来対応が実装されて予期せず成功すると
+`XPASS(strict)` として**失敗**扱いになり、`xfail` マーカーを外すべきタイミングを知らせます。
+
+| テスト | 対象 |
+| --- | --- |
+| `test_websocket_upgrade_and_echo_through_gateway` | Upgradeハンドシェイクとエコー |
+| `test_sse_streamed_incrementally_through_gateway` | イベントが逐次届くか（3秒以内に何か届くか） |
+| `test_chunked_request_body_forwarded_through_gateway` | `send_chunked.py` で複数チャンク送信し、本文が欠落しないか |
+| `test_grpc_call_through_gateway` | 単項RPCが成功するか（`grpcio` 未インストール時は自動skip） |
+
+手動での確認手順・実機確認済みの現状挙動は `tests/protocol/README_ja.md` を参照してください。
 
 ---
 
@@ -119,7 +145,7 @@ private メソッドは `(instance as any).method(...)` 経由でアクセスし
 | レイヤー | 内容 | 優先度 |
 | --- | --- | --- |
 | VS Code 拡張機能 統合テスト（拡充） | `EmulatorManager` 状態遷移・`PortDetector.detect()` フロー全体（基本的な起動・コマンド登録テストは実装済み） | `vscode.workspace` や `fs` に依存するため追加のセットアップが必要 |
-| E2E / HTTP 統合テスト | ゲートウェイを起動してリクエストを送り、レスポンスヘッダーをアサート | モック oauth2-proxy または実際の IDP クレデンシャルが必要 |
+| E2E / HTTP 統合テスト（認証ヘッダーのアサート） | ゲートウェイを起動してリクエストを送り、`X-MS-CLIENT-PRINCIPAL` 等のレスポンスヘッダーをアサート（プロトコル欠落の確認は `test_protocol_gaps.py` で実装済み） | モック oauth2-proxy または実際の IDP クレデンシャルが必要 |
 | 設定バリデーションテスト | 不正な `config.toml` を渡してエラーハンドリングを検証 | 優先度低（既存の TOML パースでほぼカバー済み） |
 
 ---
@@ -129,8 +155,8 @@ private メソッドは `(instance as any).method(...)` 経由でアクセスし
 ### Python
 
 ```bash
-# テスト依存パッケージのインストール
-pip install pytest
+# テスト依存パッケージのインストール(pytest + grpcio等)
+pip install -r requirements-test.txt
 
 # Python 単体テストをすべて実行
 pytest tests/python/ -v

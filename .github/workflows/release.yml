@@ -239,8 +239,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install pytest
-        run: pip install pytest
+      - name: Install test dependencies
+        run: pip install -r requirements-test.txt
 
       - name: Python unit tests
         run: python -m pytest tests/python/ -v

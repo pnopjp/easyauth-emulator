@@ -94,7 +94,11 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
      30s upstream read timeout ([app.py:603](../../src/app.py#L603)), the request fails
      with `502` instead.
    - **Chunked body** — `received_bytes` comes back as `0` (the gateway drops bodies sent
-     with `Transfer-Encoding: chunked` and no `Content-Length`).
+     with `Transfer-Encoding: chunked` and no `Content-Length`). Confirmed with both curl
+     (sends the body as a single chunk) and `send_chunked.py` (multiple real chunks) —
+     same result either way, since `_proxy_to` only ever checks for `Content-Length`
+     ([app.py:598-599](../../src/app.py#L598-L599)) regardless of how many chunks made up
+     the request.
    - **gRPC** — running the same `grpcurl`/gRPC client against the gateway's `SITE_PORT`
      instead of 8083 fails. The exact symptom depends on the client library, since both
      are surfacing the same root cause (the gateway is HTTP/1.1-only and cannot negotiate

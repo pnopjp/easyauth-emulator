@@ -71,7 +71,7 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
 
    - **WebSocket** — ゲートウェイは`400 Bad Request`を返す。ゲートウェイ自身のヘッダーとupstreamの`101`応答のヘッダーが混在した壊れた応答になっており、Upgradeハンドシェイクを中継できていない。
    - **SSE** — イベントが1つずつ届かず、upstreamの応答が完了する約10秒後（`PROTOCOL_APP_SSE_COUNT` × `PROTOCOL_APP_SSE_INTERVAL_SECONDS`、既定は10×1秒）に**全部まとめて**届く。`_proxy_to`が応答を全部読み切ってから返しているため（[app.py:606](../../src/app.py#L606)）。ストリームがプロキシ側のupstream読み取りタイムアウト（30秒、[app.py:603](../../src/app.py#L603)）より長く続く場合は、`502`で失敗する。
-   - **chunkedボディ** — `received_bytes`が`0`で返る（`Transfer-Encoding: chunked`かつ`Content-Length`なしの本文が黙って欠落する）。
+   - **chunkedボディ** — `received_bytes`が`0`で返る（`Transfer-Encoding: chunked`かつ`Content-Length`なしの本文が黙って欠落する）。curl（本文を1チャンクで送信）と`send_chunked.py`（複数の実チャンクで送信）の両方で確認済みで、結果は同じ。`_proxy_to`は`Content-Length`ヘッダーの有無しか見ていない（[app.py:598-599](../../src/app.py#L598-L599)）ため、チャンク数は結果に影響しない。
    - **gRPC** — 同じ`grpcurl`/gRPCクライアントをゲートウェイの`SITE_PORT`に対して実行すると失敗する。根本原因（ゲートウェイがHTTP/1.1専用でgRPCが要求するHTTP/2接続をネゴシエートできない）は同じでも、クライアント実装によって症状が異なります。
      - Pythonの`grpc`パッケージは即座に失敗: `grpc.RpcError: UNAVAILABLE — Failed parsing HTTP/2 (Expected SETTINGS frame as the first frame, ...)`
      - Go実装の`grpcurl`は自身のダイヤルタイムアウトまで待って失敗: `Failed to dial target host "localhost:<port>": context deadline exceeded`。これが出た場合、先に`curl http://localhost:<SITE_PORT>/healthz`が`ok`を返すか確認し、「何も起動していない」だけの状態ではないことを確かめてください。
