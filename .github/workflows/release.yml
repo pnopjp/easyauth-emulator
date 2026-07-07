@@ -32,10 +32,18 @@ jobs:
       - name: Check THIRD_PARTY_LICENSES
         id: check
         run: |
-          if .venv/bin/python scripts/gen_licenses.py --check; then
+          if .venv/bin/python scripts/gen_licenses.py --check 2> check.log; then
             echo "changed=false" >> $GITHUB_OUTPUT
           else
             echo "changed=true" >> $GITHUB_OUTPUT
+            cat check.log
+            {
+              echo "### :warning: THIRD_PARTY_LICENSES is out of date"
+              echo
+              echo '```diff'
+              cat check.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   # ─────────────────────────────────────────────────────────────────────────
