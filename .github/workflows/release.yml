@@ -9,7 +9,7 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────
   # License check — verify THIRD_PARTY_LICENSES is up to date
-  # If outdated, pause for human approval before proceeding
+  # If outdated, hand off to the update-licenses decision gate
   # ─────────────────────────────────────────────────────────────────────────
   check-licenses:
     name: Check licenses
@@ -39,32 +39,60 @@ jobs:
           fi
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Human approval gate — only runs when licenses have changed
-  # Requires approval from the "license-review" environment
+  # Human decision gate — only runs when licenses have changed
+  # Requires a decision from the "license-review" environment:
+  #   Approve: regenerate THIRD_PARTY_LICENSES and push the fix to main
+  #   Reject:  leave THIRD_PARTY_LICENSES untouched
+  # Either way, the release stops here. The tag already points at a commit
+  # without the fix, so re-tag from the updated main to publish it.
   # ─────────────────────────────────────────────────────────────────────────
-  approve-license-change:
-    name: Approve license change
+  update-licenses:
+    name: Update THIRD_PARTY_LICENSES
     needs: check-licenses
     if: needs.check-licenses.outputs.changed == 'true'
     runs-on: ubuntu-latest
     environment: license-review
+    permissions:
+      contents: write
 
     steps:
-      - name: License change detected
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
         run: |
-          echo "THIRD_PARTY_LICENSES is out of date."
-          echo "Please review the license changes and approve to continue the release."
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Regenerate THIRD_PARTY_LICENSES
+        run: .venv/bin/python scripts/gen_licenses.py
+
+      - name: Commit and push to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add THIRD_PARTY_LICENSES
+          git commit -m "chore: update THIRD_PARTY_LICENSES"
+          git push origin main
+
+      - name: Stop release
+        run: |
+          echo "::notice::THIRD_PARTY_LICENSES was out of date and has been updated on main."
+          echo "::notice::This release is stopped. Push a new tag from the updated main to release."
 
   # ─────────────────────────────────────────────────────────────────────────
   # Build Python binary + package VSIX for each platform
+  # Only runs when THIRD_PARTY_LICENSES was already up to date at tag time
   # ─────────────────────────────────────────────────────────────────────────
   build:
     name: Build (${{ matrix.platform }})
-    needs: [check-licenses, approve-license-change]
-    if: |
-      always() &&
-      needs.check-licenses.result == 'success' &&
-      (needs.approve-license-change.result == 'success' || needs.approve-license-change.result == 'skipped')
+    needs: check-licenses
+    if: needs.check-licenses.outputs.changed == 'false'
     strategy:
       fail-fast: false
       matrix:
