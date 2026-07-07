@@ -48,6 +48,8 @@ The extension auto-detects your app's listening port from `launch.json`, framewo
 > **Windows arm64** — Not supported. oauth2-proxy does not distribute Windows ARM binaries.
 >
 > **VS Code for Web (vscode.dev)** — Standalone vscode.dev (without a remote connection) is not supported: running the emulator binary requires native OS access. When the browser client is connected to a remote (e.g. vscode.dev + Remote - Tunnels), the extension runs on the remote host and works normally.
+>
+> **Restricted Mode / virtual workspaces** — Not supported. The extension stays disabled in Restricted Mode (untrusted workspace) and in virtual workspaces (e.g. GitHub Repositories). Trust the workspace to use it.
 
 No additional runtime installation is needed — the emulator binary is bundled inside the extension.
 
