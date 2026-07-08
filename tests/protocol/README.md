@@ -110,11 +110,28 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
        reachable first (e.g. `curl http://localhost:<SITE_PORT>/healthz` → `ok`) to rule
        out "nothing is listening" before treating this as the same gRPC gap.
 
+     This is now the *default* behavior, not an unconditional gap: gRPC support is
+     opt-in via `HTTP20_ENABLED`/`HTTP20_PROXY_MODE` (see the main README's
+     ["HTTP/2 and gRPC"](../../README.md#http2-and-grpc) section). With those set, the
+     same call succeeds — see `test_grpc_call_through_gateway` in
+     `tests/python/test_protocol_gaps.py` for a full worked example (separate gateway
+     instance, `HTTP20_ENABLED=true`/`HTTP20_PROXY_MODE=grpc-only`).
+
 ## Files
 
 - `app.py` — the HTTP + gRPC verification servers
 - `send_chunked.py` — sends a `Transfer-Encoding: chunked` POST split across multiple
   real chunks (see "Verify directly" above for usage)
+- `send_http2.py` — sends one request over plaintext HTTP/2 (h2c) and prints the
+  response; for testing `HTTP20_ENABLED` against ordinary (non-gRPC) routes, since
+  Windows builds of curl typically have no HTTP/2 support at all (`curl --version` →
+  no "HTTP2" in Features). For gRPC itself, use grpcurl or a real gRPC client instead.
+
+  ```bash
+  python -m tests.protocol.send_http2 localhost 8080 /healthz
+  python -m tests.protocol.send_http2 localhost 8080 /.auth/login
+  ```
+
 - `echo.proto` — the minimal gRPC service definition
 - `echo_pb2.py`, `echo_pb2_grpc.py` — generated from `echo.proto`; regenerate with:
 

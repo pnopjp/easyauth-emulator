@@ -233,6 +233,8 @@ http://localhost:8080/oauth2/callback
 | `easyauth.site.port` | `8080` | ゲートウェイのリッスンポート（直接アクセス時は公開ポートを兼ねる） |
 | `easyauth.tls.certFile` | `""` | TLS 証明書ファイルのパス（PEM 形式）。`tls.keyFile` と合わせて設定すると HTTPS が有効になります。Facebook Login では必須。 |
 | `easyauth.tls.keyFile` | `""` | TLS 秘密鍵ファイルのパス（PEM 形式）。`tls.certFile` と合わせて設定すると HTTPS が有効になります。Facebook Login では必須。 |
+| `easyauth.http20Enabled` | `false` | `site.port`上でHTTP/1.1に加えてHTTP/2も受け付ける |
+| `easyauth.http20ProxyMode` | `disabled` | HTTP/2リクエストをどこまでそのままアップストリームアプリに中継するか: `disabled`、`all`、`grpc-only` |
 | `easyauth.defaultIdp` | `""` | `/.auth/login` アクセス時にデフォルトで使用する IdP |
 | `easyauth.skipAuthRoutes` | `""` | 認証をバイパスするルート — カンマ区切りの `[METHOD=]REGEX` パターン |
 | `easyauth.debugHeadersEndpointEnabled` | `false` | `GET /.debug/headers` エンドポイントを有効化（注入されたヘッダーを確認可能） |

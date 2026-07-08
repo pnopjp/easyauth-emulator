@@ -6,8 +6,10 @@ import http.client
 import json
 import os
 import re
+import socket
 import ssl
 import sys
+import threading
 import tomllib
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,6 +17,11 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urljoin, urlparse, urlunparse, urlsplit
 from urllib.request import Request as UrlRequest, urlopen
+
+import h2.config
+import h2.connection
+import h2.events
+import h2.exceptions
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -120,6 +127,12 @@ _HOP_BY_HOP = frozenset({
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailers", "transfer-encoding", "upgrade",
 })
+# HTTP/2 carves out an explicit exception for TE (RFC 7540 8.1.2.2): it MAY be
+# present, and MUST be "trailers" when it is — this is exactly how gRPC
+# clients signal they can receive trailers (grpc-status/grpc-message). Strip
+# it like any other HTTP/1.1 hop-by-hop header and grpc-only/all upstream
+# relaying silently breaks (the upstream never sends a trailers frame back).
+_HOP_BY_HOP_HTTP2 = _HOP_BY_HOP - frozenset({"te"})
 
 # Simple Icons CDN slugs (https://simpleicons.org, CC0 licensed), keyed by KIND.
 # Providers not listed here fall back to the generic icon.
@@ -194,6 +207,53 @@ _TLS_ENABLED  = bool(TLS_CERT_FILE and TLS_KEY_FILE)
 # domains, reverse proxies) that may not send the header.
 _DEFAULT_PROTO = "https" if (_TLS_ENABLED or SITE_URL.startswith("https://")) else "http"
 COOKIE_SECURE = _parse_bool_cfg("OAUTH2_PROXY_COOKIE_SECURE") or _TLS_ENABLED
+
+# Client-facing HTTP/2 is additive to HTTP/1.1 on SITE_PORT (both are accepted,
+# matching App Service's "HTTP version: 2.0" — not exclusive). HTTP20_PROXY_MODE
+# controls how much of that is preserved end to end to APP_UPSTREAM, matching
+# App Service's http20ProxyFlag: "disabled" transparently downgrades to
+# HTTP/1.1 (fine for ordinary request/response traffic; breaks gRPC, which
+# cannot be represented over HTTP/1.1), "all" preserves HTTP/2 for every
+# request, "grpc-only" preserves it only for requests whose Content-Type
+# starts with application/grpc.
+HTTP20_ENABLED = _parse_bool_cfg("HTTP20_ENABLED")
+HTTP20_PROXY_MODE = (_cfg("HTTP20_PROXY_MODE", "disabled") or "disabled").strip().lower()
+if HTTP20_PROXY_MODE not in ("disabled", "all", "grpc-only"):
+    HTTP20_PROXY_MODE = "disabled"
+
+
+def _build_upstream_ssl_context(alpn_protocols: "list[str] | None" = None) -> ssl.SSLContext:
+    """TLS context used when APP_UPSTREAM is https:// (both the HTTP/1.1 and
+    HTTP/2 relay paths in _proxy_to). Reuses SSL_CA_BUNDLE — previously only
+    documented for start.py's own outbound GitHub calls — since it's the same
+    "outbound HTTPS this emulator makes" trust concern. Without an explicit
+    bundle, use truststore's own SSLContext class directly (NOT
+    truststore.inject_into_ssl(), which monkey-patches ssl.SSLContext
+    globally — this process also builds a plain server-side ssl.SSLContext
+    for its own TLS listener in main(), and truststore's wrap_socket()
+    unconditionally runs client-side peer verification even when
+    server_side=True, breaking that listener) so locally-issued dev certs
+    (e.g. mkcert, once installed into the OS store) verify without extra
+    configuration."""
+    ca_bundle = (_cfg("SSL_CA_BUNDLE") or "").strip()
+    if ca_bundle:
+        ctx = ssl.create_default_context(cafile=ca_bundle)
+    else:
+        try:
+            import truststore
+            ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        except ImportError:
+            ctx = ssl.create_default_context()
+    if alpn_protocols:
+        ctx.set_alpn_protocols(alpn_protocols)
+    return ctx
+
+
+# Two separate contexts, not one shared+mutated one: concurrent requests can
+# hit the HTTP/1.1 and HTTP/2 relay paths at the same time, and SSLContext
+# ALPN settings aren't meant to be flipped per-call on a shared instance.
+_UPSTREAM_SSL_CONTEXT = _build_upstream_ssl_context()
+_UPSTREAM_SSL_CONTEXT_H2 = _build_upstream_ssl_context(alpn_protocols=["h2"])
 
 
 def _parse_skip_routes(raw: str) -> "list[tuple[str, re.Pattern]]":
@@ -419,20 +479,92 @@ def _check_auth(idp: str, cookie: str, real_ip: str, proto: str, host: str, uri:
 # ---------------------------------------------------------------------------
 
 
-class _Handler(BaseHTTPRequestHandler):
-    server_version = "EasyAuthNative/1.0"
-    # HTTP/1.1 persistent connections. Front ends that pool backend
-    # connections (e.g. the dev tunnels edge) race against HTTP/1.0's
-    # close-after-response and lose requests (intermittent hangs / 504s).
-    # Requires every response to carry Content-Length — all response
-    # helpers and _proxy_to do.
-    protocol_version = "HTTP/1.1"
-    # Drop keep-alive connections after 2 minutes of inactivity so idle
-    # front-end connections don't pin handler threads forever.
-    timeout = 120
+class _RoutingMixin:
+    """Transport-agnostic request routing shared by the HTTP/1.1 (_Handler)
+    and HTTP/2 (_Http2StreamHandler) implementations.
 
-    def log_message(self, *_) -> None:
-        return
+    A concrete subclass must set the `path` and `command` attributes for the
+    current request, and implement the primitives below (_header,
+    _all_headers, _peer_ip, _read_request_body, and the _send_*/_redirect/
+    _send_raw_response writers). Every other method here — routing,
+    .auth/* handlers, _proxy_to — is transport-independent and shared as-is.
+    """
+
+    path: str
+    command: str
+
+    # --- Primitives a concrete transport must implement ---
+
+    def _header(self, name: str) -> str:
+        raise NotImplementedError
+
+    def _all_headers(self) -> "list[tuple[str, str]]":
+        raise NotImplementedError
+
+    def _peer_ip(self) -> str:
+        raise NotImplementedError
+
+    def _scheme(self) -> str:
+        """'http' or 'https', authoritatively determined from how this
+        specific request actually arrived (the connection's own TLS state,
+        or the HTTP/2 :scheme pseudo-header) — used as the fallback when the
+        client sent no X-Forwarded-Proto of its own."""
+        raise NotImplementedError
+
+    def _read_request_body(self) -> "bytes | None":
+        raise NotImplementedError
+
+    def _send_text(self, text: str, status: int = 200) -> None:
+        raise NotImplementedError
+
+    def _send_html(self, markup: str, status: int = 200) -> None:
+        raise NotImplementedError
+
+    def _send_json(self, data, status: int = 200) -> None:
+        raise NotImplementedError
+
+    def _send_empty(self, status: int, extra_headers: "dict[str, str] | None" = None) -> None:
+        raise NotImplementedError
+
+    def _redirect(self, url: str, status: int = 302,
+                   cookies: "list[str] | None" = None) -> None:
+        raise NotImplementedError
+
+    def _send_raw_response(self, status: int, headers: "list[tuple[str, str]]", body: bytes) -> None:
+        """Used only by _proxy_to to relay an upstream response's headers verbatim."""
+        raise NotImplementedError
+
+    def _send_response_with_trailers(self, status: int, headers: "list[tuple[str, str]]",
+                                       body: bytes, trailers: "list[tuple[str, str]]") -> None:
+        """Used only by _proxy_to when relaying an HTTP/2 upstream response (e.g.
+        gRPC's grpc-status/grpc-message trailers) — trailers are meaningless
+        over HTTP/1.1, and a genuine gRPC call can only ever arrive over a real
+        HTTP/2 connection in the first place, so the default here (append them
+        as ordinary headers) is an HTTP/1.1 fallback that in practice is never
+        exercised for real gRPC traffic. _Http2StreamHandler overrides this to
+        send trailers as an actual trailing HEADERS frame."""
+        self._send_raw_response(status, list(headers) + list(trailers), body)
+
+    # --- Request accessors built on the primitives above ---
+
+    def _query_param(self, name: str, default: str = "") -> str:
+        params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+        return params.get(name, [default])[0]
+
+    def _cookies(self) -> "dict[str, str]":
+        sc = SimpleCookie()
+        sc.load(self._header("Cookie"))
+        return {k: v.value for k, v in sc.items()}
+
+    def _client_ip(self) -> str:
+        fwd = self._header("X-Forwarded-For").split(",")[0].strip()
+        return fwd or self._peer_ip()
+
+    def _effective_proto(self) -> str:
+        """The scheme to report as X-Forwarded-Proto: an explicit header from
+        a trusted front end in front of us (e.g. a tunnel edge) wins if
+        present, otherwise our own authoritative per-request _scheme()."""
+        return self._header("X-Forwarded-Proto") or self._scheme()
 
     # --- Routing ---
 
@@ -465,76 +597,6 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_oauth2_proxy(path)
         else:
             self._handle_protected()
-
-    def do_GET(self)     -> None: self._dispatch()
-    def do_POST(self)    -> None: self._dispatch()
-    def do_PUT(self)     -> None: self._dispatch()
-    def do_DELETE(self)  -> None: self._dispatch()
-    def do_PATCH(self)   -> None: self._dispatch()
-    def do_HEAD(self)    -> None: self._dispatch()
-    def do_OPTIONS(self) -> None: self._dispatch()
-
-    # --- Request accessors ---
-
-    def _header(self, name: str) -> str:
-        return self.headers.get(name, "") or ""
-
-    def _query_param(self, name: str, default: str = "") -> str:
-        params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
-        return params.get(name, [default])[0]
-
-    def _cookies(self) -> dict[str, str]:
-        sc = SimpleCookie()
-        sc.load(self.headers.get("Cookie", ""))
-        return {k: v.value for k, v in sc.items()}
-
-    def _client_ip(self) -> str:
-        fwd = self._header("X-Forwarded-For").split(",")[0].strip()
-        return fwd or self.client_address[0]
-
-    # --- Response helpers ---
-
-    def _send_text(self, text: str, status: int = 200) -> None:
-        body = text.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_html(self, markup: str, status: int = 200) -> None:
-        body = markup.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_json(self, data, status: int = 200) -> None:
-        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_empty(self, status: int, extra_headers: "dict[str, str] | None" = None) -> None:
-        self.send_response(status)
-        for name, value in (extra_headers or {}).items():
-            self.send_header(name, value)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
-    def _redirect(self, url: str, status: int = 302,
-                   cookies: "list[str] | None" = None) -> None:
-        self.send_response(status)
-        self.send_header("Location", url)
-        for cookie in (cookies or []):
-            self.send_header("Set-Cookie", cookie)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
 
     # --- Cookie builders ---
 
@@ -574,9 +636,20 @@ class _Handler(BaseHTTPRequestHandler):
 
     # --- Proxy helper ---
 
+    def _wants_http2_upstream(self) -> bool:
+        """Whether this request should be relayed to APP_UPSTREAM over HTTP/2
+        rather than downgraded to HTTP/1.1, per HTTP20_PROXY_MODE (mirrors
+        App Service's http20ProxyFlag: disabled/all/grpc-only)."""
+        if HTTP20_PROXY_MODE == "all":
+            return True
+        if HTTP20_PROXY_MODE == "grpc-only":
+            return self._header("Content-Type").lower().startswith("application/grpc")
+        return False
+
     def _proxy_to(self, target_base: str, path_override: "str | None" = None,
                   extra_headers: "dict[str, str] | None" = None,
-                  strip_headers: "frozenset[str] | None" = None) -> None:
+                  strip_headers: "frozenset[str] | None" = None,
+                  force_http1: bool = False) -> None:
         parsed = urlsplit(target_base)
         host = parsed.hostname or "127.0.0.1"
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
@@ -586,35 +659,52 @@ class _Handler(BaseHTTPRequestHandler):
         if target_path:
             req_path = target_path + req_path
 
-        strip = (strip_headers or frozenset()) | _HOP_BY_HOP
+        # HTTP20_PROXY_MODE governs only the APP_UPSTREAM relay (mirrors Azure
+        # App Service's http20ProxyFlag). oauth2-proxy is an internal
+        # implementation detail of this emulator, not "the app" — it only
+        # ever speaks plain HTTP/1.1, so callers proxying to it pass
+        # force_http1=True to bypass HTTP20_PROXY_MODE entirely.
+        relay_as_http2 = False if force_http1 else self._wants_http2_upstream()
+        strip = (strip_headers or frozenset()) | (_HOP_BY_HOP_HTTP2 if relay_as_http2 else _HOP_BY_HOP)
         headers: dict[str, str] = {}
-        for name, value in self.headers.items():
+        for name, value in self._all_headers():
             if name.lower() in strip:
                 continue
             headers[name] = value
         if extra_headers:
             headers.update(extra_headers)
 
-        content_length = int(self.headers.get("Content-Length", 0) or 0)
-        body = self.rfile.read(content_length) if content_length > 0 else None
+        body = self._read_request_body()
+
+        upstream_tls = parsed.scheme == "https"
+
+        if relay_as_http2:
+            try:
+                status, resp_headers, resp_body, resp_trailers = _http2_relay_request(
+                    host, port, self.command, req_path, headers, body, tls=upstream_tls
+                )
+                self._send_response_with_trailers(status, resp_headers, resp_body, resp_trailers)
+            except Exception as exc:
+                print(f"[app] upstream HTTP/2 relay to {host}:{port} (tls={upstream_tls}) failed: {exc!r}", file=sys.stderr)
+                self._send_empty(502)
+            return
 
         conn: "http.client.HTTPConnection | None" = None
         try:
-            conn = http.client.HTTPConnection(host, port, timeout=30)
+            if upstream_tls:
+                conn = http.client.HTTPSConnection(host, port, timeout=30, context=_UPSTREAM_SSL_CONTEXT)
+            else:
+                conn = http.client.HTTPConnection(host, port, timeout=30)
             conn.request(self.command, req_path, body=body, headers=headers)
             resp = conn.getresponse()
             resp_body = resp.read()
 
-            self.send_response(resp.status)
             skip = _HOP_BY_HOP | frozenset({"content-length"})
-            for hname, hvalue in resp.getheaders():
-                if hname.lower() in skip:
-                    continue
-                self.send_header(hname, hvalue)
-            self.send_header("Content-Length", str(len(resp_body)))
-            self.end_headers()
-            self.wfile.write(resp_body)
-        except Exception:
+            resp_headers = [(hname, hvalue) for hname, hvalue in resp.getheaders() if hname.lower() not in skip]
+            resp_headers.append(("Content-Length", str(len(resp_body))))
+            self._send_raw_response(resp.status, resp_headers, resp_body)
+        except Exception as exc:
+            print(f"[app] upstream HTTP/1.1 relay to {host}:{port} (tls={upstream_tls}) failed: {exc!r}", file=sys.stderr)
             self._send_empty(502)
         finally:
             if conn is not None:
@@ -829,6 +919,16 @@ class _Handler(BaseHTTPRequestHandler):
         })
 
     def _handle_oauth2_proxy(self, path: str) -> None:
+        # oauth2-proxy's --redirect-url is a bare path (see start.py), so it
+        # builds the absolute redirect_uri it sends to the IdP from these two
+        # headers on each request — without them it falls back to whatever
+        # --cookie-secure implies (only ever true when the gateway itself
+        # terminates TLS locally), silently producing a wrong-scheme (or, for
+        # HTTP/2 clients with no Host header at all, wrong-host) redirect_uri.
+        oauth2_headers = {
+            "X-Forwarded-Proto": self._effective_proto(),
+            "X-Forwarded-Host": self._header("Host"),
+        }
         if path == "/oauth2/auth":
             self._send_empty(404)
             return
@@ -838,7 +938,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not port:
                 self._send_empty(502)
                 return
-            self._proxy_to(f"http://127.0.0.1:{port}")
+            self._proxy_to(f"http://127.0.0.1:{port}", extra_headers=oauth2_headers, force_http1=True)
             return
         for idp in IDP_LIST:
             prefix = f"/oauth2/{idp}/"
@@ -849,7 +949,7 @@ class _Handler(BaseHTTPRequestHandler):
                     sub = "/"
                 qs = urlsplit(self.path).query
                 new_path = f"/oauth2{sub}" + (f"?{qs}" if qs else "")
-                self._proxy_to(f"http://127.0.0.1:{port}", path_override=new_path)
+                self._proxy_to(f"http://127.0.0.1:{port}", path_override=new_path, extra_headers=oauth2_headers, force_http1=True)
                 return
         self._send_empty(404)
 
@@ -886,6 +986,436 @@ class _Handler(BaseHTTPRequestHandler):
         self._proxy_to(APP_UPSTREAM, extra_headers=extra, strip_headers=_AUTH_HEADERS_TO_STRIP)
 
 
+class _Handler(BaseHTTPRequestHandler, _RoutingMixin):
+    """HTTP/1.1 transport: implements _RoutingMixin's primitives directly on
+    top of BaseHTTPRequestHandler's own request/response I/O."""
+
+    server_version = "EasyAuthNative/1.0"
+    # HTTP/1.1 persistent connections. Front ends that pool backend
+    # connections (e.g. the dev tunnels edge) race against HTTP/1.0's
+    # close-after-response and lose requests (intermittent hangs / 504s).
+    # Requires every response to carry Content-Length — all response
+    # helpers and _proxy_to do.
+    protocol_version = "HTTP/1.1"
+    # Drop keep-alive connections after 2 minutes of inactivity so idle
+    # front-end connections don't pin handler threads forever.
+    timeout = 120
+
+    def log_message(self, *_) -> None:
+        return
+
+    def do_GET(self)     -> None: self._dispatch()
+    def do_POST(self)    -> None: self._dispatch()
+    def do_PUT(self)     -> None: self._dispatch()
+    def do_DELETE(self)  -> None: self._dispatch()
+    def do_PATCH(self)   -> None: self._dispatch()
+    def do_HEAD(self)    -> None: self._dispatch()
+    def do_OPTIONS(self) -> None: self._dispatch()
+
+    # --- _RoutingMixin primitives ---
+
+    def _header(self, name: str) -> str:
+        return self.headers.get(name, "") or ""
+
+    def _all_headers(self) -> "list[tuple[str, str]]":
+        return list(self.headers.items())
+
+    def _peer_ip(self) -> str:
+        return self.client_address[0]
+
+    def _scheme(self) -> str:
+        return "https" if isinstance(self.connection, ssl.SSLSocket) else "http"
+
+    def _read_request_body(self) -> "bytes | None":
+        content_length = int(self.headers.get("Content-Length", 0) or 0)
+        return self.rfile.read(content_length) if content_length > 0 else None
+
+    def _send_text(self, text: str, status: int = 200) -> None:
+        body = text.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_html(self, markup: str, status: int = 200) -> None:
+        body = markup.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_json(self, data, status: int = 200) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_empty(self, status: int, extra_headers: "dict[str, str] | None" = None) -> None:
+        self.send_response(status)
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _redirect(self, url: str, status: int = 302,
+                   cookies: "list[str] | None" = None) -> None:
+        self.send_response(status)
+        self.send_header("Location", url)
+        for cookie in (cookies or []):
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send_raw_response(self, status: int, headers: "list[tuple[str, str]]", body: bytes) -> None:
+        self.send_response(status)
+        for name, value in headers:
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+
+# ---------------------------------------------------------------------------
+# HTTP/2 transport (HTTP20_ENABLED)
+# ---------------------------------------------------------------------------
+
+HTTP2_CONNECTION_PREFACE = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+
+
+class _Http2StreamHandler(_RoutingMixin):
+    """One HTTP/2 stream == one logical request. All actual socket I/O is
+    delegated to the shared _Http2Connection, which owns the H2Connection
+    state machine and serializes writes across the connection's concurrent
+    streams."""
+
+    def __init__(self, conn: "_Http2Connection", stream_id: int,
+                 pseudo_headers: "dict[str, str]", headers: "list[tuple[str, str]]", body: bytes) -> None:
+        self._conn = conn
+        self._stream_id = stream_id
+        self._body = body
+        self.path = pseudo_headers.get(":path", "/")
+        self.command = pseudo_headers.get(":method", "GET")
+        self._scheme_value = pseudo_headers.get(":scheme", "http")
+        # HTTP/2 clients carry the request authority in the :authority
+        # pseudo-header instead of a literal Host header (RFC 7540
+        # 8.1.2.3), so genuine HTTP/2 clients send no Host at all. Without
+        # this, _proxy_to's downstream relay (which just forwards
+        # _all_headers() verbatim) would silently drop the request's
+        # origin, and Python's http.client would substitute the upstream's
+        # own host:port instead — visible as oauth2-proxy building its IdP
+        # redirect_uri from its own internal loopback address rather than
+        # the gateway's public one.
+        authority = pseudo_headers.get(":authority", "")
+        if authority and not any(hname.lower() == "host" for hname, _ in headers):
+            headers = [("Host", authority)] + list(headers)
+        self._headers = headers
+
+    # --- _RoutingMixin primitives ---
+
+    def _header(self, name: str) -> str:
+        lname = name.lower()
+        for hname, hvalue in self._headers:
+            if hname.lower() == lname:
+                return hvalue
+        return ""
+
+    def _all_headers(self) -> "list[tuple[str, str]]":
+        return list(self._headers)
+
+    def _peer_ip(self) -> str:
+        return self._conn.peer_ip
+
+    def _scheme(self) -> str:
+        return self._scheme_value or "http"
+
+    def _read_request_body(self) -> "bytes | None":
+        return self._body or None
+
+    def _send_text(self, text: str, status: int = 200) -> None:
+        body = text.encode("utf-8")
+        self._send_response(status, [("content-type", "text/plain; charset=utf-8")], body)
+
+    def _send_html(self, markup: str, status: int = 200) -> None:
+        body = markup.encode("utf-8")
+        self._send_response(status, [
+            ("content-type", "text/html; charset=utf-8"),
+            ("cache-control", "no-store"),
+        ], body)
+
+    def _send_json(self, data, status: int = 200) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self._send_response(status, [
+            ("content-type", "application/json; charset=utf-8"),
+            ("cache-control", "no-store"),
+        ], body)
+
+    def _send_empty(self, status: int, extra_headers: "dict[str, str] | None" = None) -> None:
+        self._send_response(status, list((extra_headers or {}).items()), b"")
+
+    def _redirect(self, url: str, status: int = 302,
+                   cookies: "list[str] | None" = None) -> None:
+        headers = [("location", url)] + [("set-cookie", cookie) for cookie in (cookies or [])]
+        self._send_response(status, headers, b"")
+
+    def _send_raw_response(self, status: int, headers: "list[tuple[str, str]]", body: bytes) -> None:
+        # Content-Length is redundant in HTTP/2 (framing comes from the DATA
+        # frame boundaries, not a header) but harmless to pass through.
+        self._send_response(status, headers, body)
+
+    def _send_response_with_trailers(self, status: int, headers: "list[tuple[str, str]]",
+                                       body: bytes, trailers: "list[tuple[str, str]]") -> None:
+        self._conn.send_stream_response(self._stream_id, status, headers, body, trailers=trailers or None)
+
+    def _send_response(self, status: int, headers: "list[tuple[str, str]]", body: bytes) -> None:
+        self._conn.send_stream_response(self._stream_id, status, headers, body)
+
+
+class _Http2Connection:
+    """Owns one TCP connection's H2Connection state machine. run() executes
+    the read loop on the calling thread; each fully-received request (stream)
+    is dispatched to its own thread so a slow handler (e.g. the auth check's
+    outbound HTTP call) doesn't block other concurrent streams on the same
+    connection. Response bodies are sent as a single DATA frame — fine for
+    ordinary Easy Auth responses (JSON/HTML/redirects), which _proxy_to also
+    already buffers fully in memory; a response larger than the default flow
+    control window would need proper windowed sending, not implemented here.
+    """
+
+    def __init__(self, sock: "socket.socket") -> None:
+        self._sock = sock
+        self._conn = h2.connection.H2Connection(config=h2.config.H2Configuration(client_side=False))
+        self._write_lock = threading.RLock()
+        self._streams: "dict[int, dict]" = {}
+        try:
+            self.peer_ip = sock.getpeername()[0]
+        except OSError:
+            self.peer_ip = ""
+
+    def run(self) -> None:
+        self._conn.initiate_connection()
+        self._flush()
+        try:
+            while True:
+                try:
+                    data = self._sock.recv(65536)
+                except OSError:
+                    return
+                if not data:
+                    return
+                try:
+                    events = self._conn.receive_data(data)
+                except h2.exceptions.ProtocolError:
+                    return
+                closed = False
+                for event in events:
+                    if isinstance(event, h2.events.ConnectionTerminated):
+                        closed = True
+                    else:
+                        self._handle_event(event)
+                self._flush()
+                if closed:
+                    return
+        finally:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+
+    def _handle_event(self, event) -> None:
+        if isinstance(event, h2.events.RequestReceived):
+            self._streams[event.stream_id] = {"headers": event.headers, "body": bytearray()}
+        elif isinstance(event, h2.events.DataReceived):
+            stream = self._streams.get(event.stream_id)
+            if stream is not None:
+                stream["body"] += event.data
+            self._conn.acknowledge_received_data(len(event.data), event.stream_id)
+        elif isinstance(event, h2.events.StreamEnded):
+            stream = self._streams.pop(event.stream_id, None)
+            if stream is not None:
+                threading.Thread(
+                    target=self._dispatch_stream,
+                    args=(event.stream_id, stream["headers"], bytes(stream["body"])),
+                    daemon=True,
+                ).start()
+        elif isinstance(event, h2.events.StreamReset):
+            self._streams.pop(event.stream_id, None)
+
+    def _dispatch_stream(self, stream_id: int, raw_headers, body: bytes) -> None:
+        pseudo: "dict[str, str]" = {}
+        headers: "list[tuple[str, str]]" = []
+        for name, value in raw_headers:
+            name = name.decode() if isinstance(name, bytes) else name
+            value = value.decode() if isinstance(value, bytes) else value
+            if name.startswith(":"):
+                pseudo[name] = value
+            else:
+                headers.append((name, value))
+        handler = _Http2StreamHandler(self, stream_id, pseudo, headers, body)
+        try:
+            handler._dispatch()
+        except Exception:
+            try:
+                self.send_stream_response(stream_id, 500, [], b"")
+            except Exception:
+                pass
+
+    def send_stream_response(self, stream_id: int, status: int,
+                              headers: "list[tuple[str, str]]", body: bytes,
+                              trailers: "list[tuple[str, str]] | None" = None) -> None:
+        with self._write_lock:
+            response_headers = [(":status", str(status))]
+            response_headers.extend((name, value) for name, value in headers if name.lower() != "content-length")
+            try:
+                self._conn.send_headers(stream_id, response_headers)
+                if trailers:
+                    self._conn.send_data(stream_id, body, end_stream=False)
+                    self._conn.send_headers(stream_id, trailers, end_stream=True)
+                else:
+                    self._conn.send_data(stream_id, body, end_stream=True)
+            except h2.exceptions.StreamClosedError:
+                return
+            self._flush()
+
+    def _flush(self) -> None:
+        with self._write_lock:
+            data = self._conn.data_to_send()
+            if data:
+                try:
+                    self._sock.sendall(data)
+                except OSError:
+                    pass
+
+
+_H2_REQUEST_PSEUDO_HEADERS = frozenset({":method", ":path", ":scheme", ":authority"})
+
+
+def _http2_relay_request(host: str, port: int, method: str, path: str,
+                          headers: "dict[str, str]", body: "bytes | None",
+                          tls: bool = False
+                          ) -> "tuple[int, list[tuple[str, str]], bytes, list[tuple[str, str]]]":
+    """Relay one request to APP_UPSTREAM over a fresh HTTP/2 connection —
+    plaintext (h2c) or, when tls=True, TLS with ALPN "h2" negotiation
+    (required by upstreams like nginx that only ever speak HTTP/2 over TLS) —
+    and collect the full response. Used by _proxy_to for HTTP20_PROXY_MODE
+    "all"/"grpc-only". Unary request/response only: the request body (if any)
+    is sent as a single DATA frame and the full response (headers, body,
+    trailers) is collected before returning, mirroring _proxy_to's existing
+    HTTP/1.1 path — not a general bidirectional-streaming gRPC client."""
+    conn = h2.connection.H2Connection(config=h2.config.H2Configuration(client_side=True))
+    conn.initiate_connection()
+    sock = socket.create_connection((host, port), timeout=30)
+    if tls:
+        sock = _UPSTREAM_SSL_CONTEXT_H2.wrap_socket(sock, server_hostname=host)
+        if sock.selected_alpn_protocol() != "h2":
+            raise ConnectionError(f"upstream did not negotiate HTTP/2 over TLS (got {sock.selected_alpn_protocol()!r})")
+    try:
+        sock.sendall(conn.data_to_send())
+
+        stream_id = conn.get_next_available_stream_id()
+        request_headers = [
+            (":method", method),
+            (":path", path),
+            (":scheme", "https" if tls else "http"),
+            (":authority", f"{host}:{port}"),
+        ]
+        for name, value in headers.items():
+            if name.lower() in _H2_REQUEST_PSEUDO_HEADERS or name.lower() == "host":
+                continue
+            request_headers.append((name.lower(), value))
+        conn.send_headers(stream_id, request_headers, end_stream=body is None)
+        sock.sendall(conn.data_to_send())
+        if body is not None:
+            conn.send_data(stream_id, body, end_stream=True)
+            sock.sendall(conn.data_to_send())
+
+        status = 502
+        resp_headers: "list[tuple[str, str]]" = []
+        resp_trailers: "list[tuple[str, str]]" = []
+        resp_body = bytearray()
+        got_response = False
+        abort_reason = ""
+        done = False
+        while not done:
+            data = sock.recv(65536)
+            if not data:
+                break
+            for event in conn.receive_data(data):
+                if isinstance(event, h2.events.ResponseReceived):
+                    got_response = True
+                    for name, value in event.headers:
+                        name = name.decode() if isinstance(name, bytes) else name
+                        value = value.decode() if isinstance(value, bytes) else value
+                        if name == ":status":
+                            status = int(value)
+                        else:
+                            resp_headers.append((name, value))
+                elif isinstance(event, h2.events.DataReceived):
+                    resp_body += event.data
+                    conn.acknowledge_received_data(len(event.data), event.stream_id)
+                elif isinstance(event, h2.events.TrailersReceived):
+                    for name, value in event.headers:
+                        name = name.decode() if isinstance(name, bytes) else name
+                        value = value.decode() if isinstance(value, bytes) else value
+                        resp_trailers.append((name, value))
+                elif isinstance(event, h2.events.StreamEnded):
+                    done = True
+                elif isinstance(event, h2.events.StreamReset):
+                    abort_reason = f"upstream reset the stream (error_code={event.error_code!r})"
+                    done = True
+                elif isinstance(event, h2.events.ConnectionTerminated):
+                    abort_reason = abort_reason or f"upstream closed the connection (error_code={event.error_code!r}, additional_data={event.additional_data!r})"
+                    done = True
+            out = conn.data_to_send()
+            if out:
+                sock.sendall(out)
+        if not got_response:
+            reason = abort_reason or "connection closed with no data"
+            raise ConnectionError(f"no HTTP/2 response received from {host}:{port} ({reason})")
+        return status, resp_headers, bytes(resp_body), resp_trailers
+    finally:
+        sock.close()
+
+
+def _looks_like_http2_preface(sock: "socket.socket") -> bool:
+    """Peek (without consuming) the start of a plaintext connection to tell
+    an h2c client's connection preface apart from an ordinary HTTP/1.1
+    request line. Only meaningful for non-TLS sockets — TLS connections
+    negotiate the protocol via ALPN instead (checked by the caller)."""
+    try:
+        sock.settimeout(0.5)
+        peeked = sock.recv(len(HTTP2_CONNECTION_PREFACE), socket.MSG_PEEK)
+    except OSError:
+        return False
+    finally:
+        sock.settimeout(None)
+    return len(peeked) > 0 and HTTP2_CONNECTION_PREFACE.startswith(peeked)
+
+
+class _MultiplexingServer(ThreadingHTTPServer):
+    """Accepts both HTTP/1.1 and HTTP/2 on the same SITE_PORT (when
+    HTTP20_ENABLED) — mirrors App Service's "HTTP version: 2.0" being additive
+    to, not exclusive of, HTTP/1.1. Peeks at each new connection (or checks
+    the negotiated ALPN protocol for TLS) before constructing a handler,
+    since h2 cannot itself speak HTTP/1.1 and BaseHTTPRequestHandler cannot
+    itself speak HTTP/2."""
+
+    def finish_request(self, request, client_address) -> None:
+        if HTTP20_ENABLED:
+            if isinstance(request, ssl.SSLSocket):
+                is_http2 = request.selected_alpn_protocol() == "h2"
+            else:
+                is_http2 = _looks_like_http2_preface(request)
+            if is_http2:
+                _Http2Connection(request).run()
+                return
+        _Handler(request, client_address, self)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -897,9 +1427,9 @@ def main() -> None:
         # On Windows, SO_REUSEADDR lets a second process bind an in-use port,
         # silently splitting requests between two gateway instances (e.g. a
         # stale emulator left over from a crashed session) — fail fast instead.
-        ThreadingHTTPServer.allow_reuse_address = False
+        _MultiplexingServer.allow_reuse_address = False
     try:
-        server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)
+        server = _MultiplexingServer(("0.0.0.0", port), _Handler)
     except OSError as exc:
         print(
             f"[app] ERROR: cannot listen on port {port}: {exc} — "
@@ -914,10 +1444,12 @@ def main() -> None:
         except Exception as exc:
             print(f"[app] ERROR: Failed to load TLS certificate: {exc}", file=sys.stderr)
             sys.exit(1)
+        if HTTP20_ENABLED:
+            ctx.set_alpn_protocols(["h2", "http/1.1"])
         server.socket = ctx.wrap_socket(server.socket, server_side=True)
-        print(f"[app] Listening on https://0.0.0.0:{port}")
+        print(f"[app] Listening on https://0.0.0.0:{port}" + (" (HTTP/2 enabled)" if HTTP20_ENABLED else ""))
     else:
-        print(f"[app] Listening on http://0.0.0.0:{port}")
+        print(f"[app] Listening on http://0.0.0.0:{port}" + (" (HTTP/2 enabled)" if HTTP20_ENABLED else ""))
     server.serve_forever()
 
 

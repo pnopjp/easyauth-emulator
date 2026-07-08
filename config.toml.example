@@ -14,6 +14,7 @@ SITE_PORT = "8080"
 # URL of the application that authenticated requests are forwarded to.
 # Defaults to http://localhost:8081 (same as the default SAMPLE_APP_PORT).
 # When SAMPLE_APP_ENABLED is false, set this to the port of your own application.
+# May also be https:// — see SSL_CA_BUNDLE below for certificate verification.
 APP_UPSTREAM = "http://localhost:8081"
 
 # Debug endpoint (default: disabled).
@@ -45,11 +46,25 @@ DEBUG_HEADERS_ENDPOINT_ENABLED = false
 # TLS_KEY_FILE  = "./server.key"
 
 # Path to a custom CA certificate bundle (PEM format).
-# Used for outbound HTTPS connections the emulator makes to GitHub (oauth2-proxy downloads).
-# Normally not needed — the OS certificate store (Windows, macOS, Linux) is used
-# automatically. Set this only when the required CA is not in the OS trust store.
+# Used for outbound HTTPS connections the emulator makes: to GitHub (oauth2-proxy
+# downloads), and to APP_UPSTREAM when it's https://. Normally not needed — the OS
+# certificate store (Windows, macOS, Linux) is used automatically (a locally-issued
+# dev cert, e.g. mkcert, verifies once its CA is installed into that store). Set this
+# only when the required CA is not in the OS trust store.
 # Example: SSL_CA_BUNDLE = "C:/certs/corporate-ca.pem"
 # SSL_CA_BUNDLE = ""
+
+# Accept HTTP/2 on SITE_PORT, alongside HTTP/1.1 (not exclusive of it — mirrors
+# Azure App Service's "HTTP version: 2.0"). See README.md "HTTP/2 and gRPC" for
+# details.
+# HTTP20_ENABLED = false
+
+# How much of an HTTP/2 request is preserved end to end to APP_UPSTREAM
+# (mirrors Azure App Service's http20ProxyFlag):
+#   disabled   — downgrade everything to HTTP/1.1 (breaks gRPC, fine otherwise)
+#   all        — relay everything as HTTP/2 (APP_UPSTREAM must speak HTTP/2)
+#   grpc-only  — relay only requests with a Content-Type of application/grpc*
+# HTTP20_PROXY_MODE = "disabled"
 
 # ---- oauth2-proxy settings --------------------------------------------------
 

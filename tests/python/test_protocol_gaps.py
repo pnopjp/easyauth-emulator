@@ -1,12 +1,21 @@
 """
-Regression tests for the protocol gaps tracked in ToDo.md: WebSocket, gRPC,
-SSE/streaming, and chunked request bodies. Automates the manual procedure in
-tests/protocol/README.md.
+Regression tests for the protocol gaps tracked in ToDo.md: WebSocket,
+SSE/streaming, chunked request bodies, and gRPC. Automates the manual
+procedure in tests/protocol/README.md.
 
-Each test asserts the CORRECT (fully working) behavior and is marked
-xfail(strict=True): it currently fails because the gap is real, and will
-flip to an unexpected pass once the gap is closed — pytest reports that as a
-failure (strict=True), which is the signal to remove the xfail marker.
+WebSocket/SSE/chunked-body tests assert the CORRECT (fully working) behavior
+and are marked xfail(strict=True): they currently fail because the gap is
+real, and will flip to an unexpected pass once the gap is closed — pytest
+reports that as a failure (strict=True), which is the signal to remove the
+xfail marker.
+
+gRPC is implemented (as of the HTTP/2 support work) but is opt-in — off by
+default, like App Service's own http20ProxyFlag. test_grpc_call_through_gateway
+uses a separate gateway instance with HTTP20_ENABLED/HTTP20_PROXY_MODE=grpc-only
+set, and asserts success directly (no xfail: this gap is closed, for that
+configuration). test_grpc_disabled_by_default_does_not_hang confirms the
+default (HTTP20_ENABLED unset) gateway used by the other tests still fails
+fast rather than accidentally starting to accept gRPC.
 
 Run:
     pip install -r requirements-test.txt
@@ -69,62 +78,85 @@ def _stop(proc: "subprocess.Popen | None") -> None:
         proc.wait(timeout=5)
 
 
-@pytest.fixture(scope="module")
-def protocol_stack(tmp_path_factory):
-    protocol_http_port = _free_port()
-    protocol_grpc_port = _free_port()
-    gateway_port = _free_port()
+def _empty_config(tmp_path_factory) -> Path:
     # An explicit --config pointing at an empty file keeps this hermetic —
     # without it, src/app.py falls back to reading ./config.toml (a real,
     # secret-bearing dev config) when run with cwd=REPO_ROOT.
-    empty_config = tmp_path_factory.mktemp("protocol_gaps") / "empty.toml"
-    empty_config.write_text("")
+    path = tmp_path_factory.mktemp("protocol_gaps") / "empty.toml"
+    path.write_text("")
+    return path
 
-    protocol_proc = None
-    gateway_proc = None
+
+def _start_gateway(tmp_path_factory, extra_env: dict) -> "tuple[subprocess.Popen, int]":
+    gateway_port = _free_port()
+    proc = subprocess.Popen(
+        [sys.executable, "src/app.py", "--config", str(_empty_config(tmp_path_factory))],
+        cwd=REPO_ROOT,
+        env={**os.environ, "SITE_PORT": str(gateway_port), **extra_env},
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    _wait_for_port("127.0.0.1", gateway_port)
+    return proc, gateway_port
+
+
+@pytest.fixture(scope="module")
+def protocol_app(tmp_path_factory):
+    """The verification app from tests/protocol/ — listens on its own HTTP
+    port (WebSocket/SSE/chunked-body test endpoints) and its own gRPC port,
+    independent of any gateway instance."""
+    http_port = _free_port()
+    grpc_port = _free_port()
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "tests.protocol.app"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "PROTOCOL_APP_PORT": str(http_port), "PROTOCOL_APP_GRPC_PORT": str(grpc_port)},
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
     try:
-        protocol_proc = subprocess.Popen(
-            [sys.executable, "-m", "tests.protocol.app"],
-            cwd=REPO_ROOT,
-            env={
-                **os.environ,
-                "PROTOCOL_APP_PORT": str(protocol_http_port),
-                "PROTOCOL_APP_GRPC_PORT": str(protocol_grpc_port),
-            },
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        )
-        _wait_for_port("127.0.0.1", protocol_http_port)
-        _wait_for_port("127.0.0.1", protocol_grpc_port)
-
-        gateway_proc = subprocess.Popen(
-            [sys.executable, "src/app.py", "--config", str(empty_config)],
-            cwd=REPO_ROOT,
-            env={
-                **os.environ,
-                "SITE_PORT": str(gateway_port),
-                "APP_UPSTREAM": f"http://127.0.0.1:{protocol_http_port}",
-                "SKIP_AUTH_ROUTES": "/ws/,/sse/,/chunked/",
-            },
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        )
-        _wait_for_port("127.0.0.1", gateway_port)
+        _wait_for_port("127.0.0.1", http_port)
+        _wait_for_port("127.0.0.1", grpc_port)
     except Exception:
-        _stop(protocol_proc)
-        _stop(gateway_proc)
+        _stop(proc)
         raise
+    yield {"http_port": http_port, "grpc_port": grpc_port}
+    _stop(proc)
 
-    yield {"gateway_port": gateway_port}
 
-    _stop(gateway_proc)
-    _stop(protocol_proc)
+@pytest.fixture(scope="module")
+def gateway_port(tmp_path_factory, protocol_app):
+    """Default gateway: HTTP/2 off, upstream is the verification app's HTTP
+    port — used by the WebSocket/SSE/chunked-body tests, which are unrelated
+    to HTTP/2 and unaffected by it being enabled or not."""
+    proc, port = _start_gateway(tmp_path_factory, {
+        "APP_UPSTREAM": f"http://127.0.0.1:{protocol_app['http_port']}",
+        "SKIP_AUTH_ROUTES": "/ws/,/sse/,/chunked/,/echo\\.Echo/",
+    })
+    yield port
+    _stop(proc)
+
+
+@pytest.fixture(scope="module")
+def grpc_gateway_port(tmp_path_factory, protocol_app):
+    """A separate gateway instance with HTTP20_ENABLED and
+    HTTP20_PROXY_MODE=grpc-only, upstream pointed at the verification app's
+    gRPC port — APP_UPSTREAM is a single address, so gRPC (a real HTTP/2
+    server) and the plain HTTP endpoints can't share one gateway instance."""
+    proc, port = _start_gateway(tmp_path_factory, {
+        "APP_UPSTREAM": f"http://127.0.0.1:{protocol_app['grpc_port']}",
+        "SKIP_AUTH_ROUTES": "/echo\\.Echo/",
+        "HTTP20_ENABLED": "true",
+        "HTTP20_PROXY_MODE": "grpc-only",
+    })
+    yield port
+    _stop(proc)
 
 
 @pytest.mark.xfail(
     strict=True,
     reason="ToDo.md: WebSocket is not supported (HTTP/1.1 request/response proxying only)",
 )
-def test_websocket_upgrade_and_echo_through_gateway(protocol_stack):
-    port = protocol_stack["gateway_port"]
+def test_websocket_upgrade_and_echo_through_gateway(gateway_port):
+    port = gateway_port
     key = base64.b64encode(b"0123456789012345").decode()
     request = (
         "GET /ws/echo HTTP/1.1\r\n"
@@ -155,8 +187,8 @@ def test_websocket_upgrade_and_echo_through_gateway(protocol_stack):
     reason="ToDo.md: SSE/streaming is not supported "
            "(_proxy_to buffers the full upstream response before replying)",
 )
-def test_sse_streamed_incrementally_through_gateway(protocol_stack):
-    port = protocol_stack["gateway_port"]
+def test_sse_streamed_incrementally_through_gateway(gateway_port):
+    port = gateway_port
     request = f"GET /sse/stream HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
     with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
         sock.sendall(request.encode())
@@ -173,8 +205,8 @@ def test_sse_streamed_incrementally_through_gateway(protocol_stack):
     reason="ToDo.md: chunked request bodies are dropped "
            "(_proxy_to only reads a body when Content-Length is present)",
 )
-def test_chunked_request_body_forwarded_through_gateway(protocol_stack):
-    port = protocol_stack["gateway_port"]
+def test_chunked_request_body_forwarded_through_gateway(gateway_port):
+    port = gateway_port
     text = "chunked request body test"
     parts = [text[i:i + 8] for i in range(0, len(text), 8)]
     response = send_chunked("127.0.0.1", port, "/chunked/echo", parts, delay=0)
@@ -184,14 +216,25 @@ def test_chunked_request_body_forwarded_through_gateway(protocol_stack):
 
 
 @pytest.mark.skipif(not HAS_GRPC, reason="grpcio not installed — see requirements-test.txt")
-@pytest.mark.xfail(
-    strict=True,
-    reason="ToDo.md: gRPC is not supported "
-           "(HTTP/1.1 request/response proxying only, cannot negotiate HTTP/2)",
-)
-def test_grpc_call_through_gateway(protocol_stack):
-    port = protocol_stack["gateway_port"]
-    channel = grpc.insecure_channel(f"127.0.0.1:{port}")
+def test_grpc_disabled_by_default_does_not_hang(gateway_port):
+    """HTTP20_ENABLED/HTTP20_PROXY_MODE default to off (mirrors App Service's
+    http20ProxyFlag defaulting to disabled) — a gRPC call against a gateway
+    that never opted in must fail promptly, not hang."""
+    channel = grpc.insecure_channel(f"127.0.0.1:{gateway_port}")
+    try:
+        stub = echo_pb2_grpc.EchoStub(channel)
+        with pytest.raises(grpc.RpcError):
+            stub.SayHello(echo_pb2.HelloRequest(name="world"), timeout=GRPC_TIMEOUT)
+    finally:
+        channel.close()
+
+
+@pytest.mark.skipif(not HAS_GRPC, reason="grpcio not installed — see requirements-test.txt")
+def test_grpc_call_through_gateway(grpc_gateway_port):
+    """With HTTP20_ENABLED and HTTP20_PROXY_MODE=grpc-only, a real gRPC call
+    survives the gateway end to end (client → gateway → upstream gRPC
+    service), including the grpc-status trailer."""
+    channel = grpc.insecure_channel(f"127.0.0.1:{grpc_gateway_port}")
     try:
         stub = echo_pb2_grpc.EchoStub(channel)
         response = stub.SayHello(echo_pb2.HelloRequest(name="world"), timeout=GRPC_TIMEOUT)

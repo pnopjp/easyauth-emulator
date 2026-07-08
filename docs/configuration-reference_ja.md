@@ -24,7 +24,7 @@
 | `DEFAULT_IDP` | | — | 未認証時に使用する既定 IdP。`IDP_LIST` に含まれる値を指定。未設定時の挙動は下記参照。 |
 | `SITE_URL` | | `http://localhost` | リクエストに `Host` ヘッダーがない場合に使われるフォールバック URL（末尾スラッシュなし）。通常は変更不要。TLS 終端するフロント（リバースプロキシ）が `X-Forwarded-Proto` を送らない場合のみ `https://` の値を設定（dev tunnels は送る）。 |
 | `SITE_PORT` | | `8080` | このゲートウェイのリッスンポート（直接アクセスする場合は公開ポートを兼ねる）。 |
-| `APP_UPSTREAM` | | `http://localhost:8081` ※ | 認証済みリクエストの転送先 URL。自分のアプリを使う場合はそのアプリの URL を設定してください。 |
+| `APP_UPSTREAM` | | `http://localhost:8081` ※ | 認証済みリクエストの転送先 URL。自分のアプリを使う場合はそのアプリの URL を設定してください。`https://` も指定可能——証明書検証については `SSL_CA_BUNDLE` を参照。 |
 | `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | `GET /.debug/headers` 診断エンドポイントを有効化するか。有効時はその URL でエミュレーターが受け取り計算したヘッダーを確認できる。既定では無効（`404` を返す）。 |
 | `SKIP_AUTH_ROUTES` | | — | 認証をスキップしてアップストリームへ直接転送するルート。形式: リクエストパスにマッチする `[METHOD=]REGEX` パターンをカンマ区切りで列挙。例: `GET=^/health$,^/public/`。転送前に認証ヘッダーは除去される。 |
 | `IDP_SELECT_ICONS` | | `simple` | `/.auth/login/select` 画面のアイコンスタイル。`simple` — Simple Icons CDN のロゴ。`generic` — 汎用 ID カードアイコン（完全オフライン対応）。`text` — アイコンなし、テキストのみ。 |
@@ -130,7 +130,9 @@ Facebook Login はリダイレクト URI に HTTPS を要求します。`TLS_CER
 | --- | :---: | --- | --- |
 | `TLS_CERT_FILE` | | — | TLS サーバー証明書（PEM 形式）のパス。`TLS_KEY_FILE` とともに設定すると、エミュレーターが HTTPS でリクエストを受け付けます。 |
 | `TLS_KEY_FILE` | | — | TLS 秘密鍵（PEM 形式）のパス。`TLS_CERT_FILE` とともに設定すると、エミュレーターが HTTPS でリクエストを受け付けます。 |
-| `SSL_CA_BUNDLE` | | — | カスタム CA 証明書バンドル（PEM 形式）のパス。エミュレーター自身が GitHub へ HTTPS 接続する際（oauth2-proxy のダウンロード）に使用します。通常は不要 — [truststore](https://github.com/sethmlarson/truststore) によって OS の証明書ストア（Windows・macOS・Linux）が自動的に参照されます。社内ネットワークに SSL インスペクション（MITM プロキシ）があり、そのプロキシの CA を OS のストアに追加できない場合（例: Linux でルート権限がない環境）にのみ設定してください。 |
+| `SSL_CA_BUNDLE` | | — | カスタム CA 証明書バンドル（PEM 形式）のパス。エミュレーター自身が HTTPS 接続する際（GitHubへのoauth2-proxyダウンロード、および`APP_UPSTREAM`が`https://`の場合）に使用します。通常は不要 — [truststore](https://github.com/sethmlarson/truststore) によって OS の証明書ストア（Windows・macOS・Linux）が自動的に参照されます（mkcert等のローカル開発用証明書も、そのCAをOSストアにインストール済みであれば検証できます）。社内ネットワークに SSL インスペクション（MITM プロキシ）があり、そのプロキシの CA を OS のストアに追加できない場合（例: Linux でルート権限がない環境）にのみ設定してください。 |
+| `HTTP20_ENABLED` | | `false` | `SITE_PORT`上でHTTP/1.1に加えてHTTP/2も受け付けるか（併用であり排他ではない — Azure App Serviceの「HTTPバージョン: 2.0」と同じ考え方）。詳細はメインREADMEの[HTTP/2とgRPC](../README_ja.md#http2とgrpc)を参照。 |
+| `HTTP20_PROXY_MODE` | | `disabled` | HTTP/2リクエストをどこまで`APP_UPSTREAM`まで維持するか（Azure App Serviceの`http20ProxyFlag`に相当）。`disabled`は全部HTTP/1.1に変換（gRPCが壊れる）、`all`は全部HTTP/2のまま中継（`APP_UPSTREAM`がHTTP/2を話せる必要がある）、`grpc-only`は`Content-Type`が`application/grpc*`のリクエストだけHTTP/2のまま中継。 |
 
 #### HTTPS (TLS) を有効にする
 
@@ -211,11 +213,25 @@ openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
 
 ### アプリに到達できない（502 エラー）
 
+考えられる原因の一例として、以下があります。
+
+#### 1. `APP_UPSTREAM` の設定・起動状態
+
 `APP_UPSTREAM` が正しく設定されているか、アプリケーションがその URL で起動しているか確認してください。
+
+#### 2. アップストリームのHTTP/2ヘッダーサイズ制限（`HTTP20_PROXY_MODE = "all"` / `"grpc-only"`）
+
+ログイン成功後のリクエストでのみ発生する場合（毎回ではない）、アップストリームがHTTP/2のヘッダーサイズ制限でリクエストを拒否している可能性があります。oauth2-proxyのセッションクッキーは、アクセストークン/IDトークンを埋め込む設定（`--pass-access-token`/`--set-authorization-header`）により数KBを超えることがあり、nginxなどはHTTP/2リクエストのヘッダーサイズに既定の上限を設けています。エミュレーター自身の出力に以下のようなログが出ていないか確認してください。
+
+```text
+[app] upstream HTTP/2 relay to <host>:<port> (tls=True) failed: ConnectionError('no HTTP/2 response received from ... (upstream reset the stream (error_code=<ErrorCodes.ENHANCE_YOUR_CALM: 11>))')
+```
+
+`APP_UPSTREAM`側のサーバーソフトウェアがnginxの場合は、該当する上限を上げてリロードしてください。`http2_max_field_size`/`http2_max_header_size`（nginx 1.19.7より前）、または`large_client_header_buffers`（1.19.7以降、HTTP/1.xと共通）。あるいは、アップストリームがHTTP/2のまま中継する必要がないなら、`HTTP20_PROXY_MODE`を`"disabled"`（特定のgRPCルートだけ必要なら`"grpc-only"`）に変更してください。
 
 ### oauth2-proxy が HTTP 500 を返す
 
-いくつかの原因が考えられます。
+考えられる原因の一例として、以下があります。
 
 #### 1. クライアントシークレットが間違っている
 

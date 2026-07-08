@@ -24,7 +24,7 @@ Security note:
 | `DEFAULT_IDP` | | — | Default IDP when no session or selection cookie is present. Must be one of the `IDP_LIST` values. See default selection behavior below. |
 | `SITE_URL` | | `http://localhost` | Fallback base URL used when a request carries no `Host` header (without a trailing slash). Usually no change needed. Set an `https://` value only if a TLS-terminating front end (reverse proxy) does not send `X-Forwarded-Proto` — the dev tunnels edge sends it. |
 | `SITE_PORT` | | `8080` | Listen port of this gateway (also the public port when accessed directly). |
-| `APP_UPSTREAM` | | `http://localhost:8081` ※ | URL that authenticated requests are forwarded to. Set to your application's URL when using your own app. |
+| `APP_UPSTREAM` | | `http://localhost:8081` ※ | URL that authenticated requests are forwarded to. Set to your application's URL when using your own app. May be `https://` — see `SSL_CA_BUNDLE` for certificate verification. |
 | `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | Enables the `GET /.debug/headers` diagnostic endpoint. When enabled, that URL shows the headers the emulator receives and computes. Disabled by default — returns `404`. |
 | `SKIP_AUTH_ROUTES` | | — | Routes that bypass authentication and are forwarded directly to the upstream. Format: comma-separated list of `[METHOD=]REGEX` patterns matched against the request path. Example: `GET=^/health$,^/public/`. Injected auth headers are stripped before forwarding. |
 | `IDP_SELECT_ICONS` | | `simple` | Icon style for the `/.auth/login/select` page. `simple` — Simple Icons CDN logo. `generic` — generic ID card icon (fully offline). `text` — no icon, text labels only. |
@@ -130,7 +130,9 @@ Version management behavior:
 | --- | :---: | --- | --- |
 | `TLS_CERT_FILE` | | — | Path to the TLS server certificate (PEM format). When set together with `TLS_KEY_FILE`, the emulator accepts inbound requests over HTTPS. |
 | `TLS_KEY_FILE` | | — | Path to the TLS private key (PEM format). When set together with `TLS_CERT_FILE`, the emulator accepts inbound requests over HTTPS. |
-| `SSL_CA_BUNDLE` | | — | Path to a custom CA certificate bundle (PEM format). Used for outbound HTTPS connections the emulator makes to GitHub (oauth2-proxy downloads). Normally not needed — the OS certificate store (Windows, macOS, Linux) is used automatically via [truststore](https://github.com/sethmlarson/truststore). Set this only when your network has SSL inspection (MITM proxy) and the proxy CA cannot be added to the OS trust store, for example on Linux without root access. |
+| `SSL_CA_BUNDLE` | | — | Path to a custom CA certificate bundle (PEM format). Used for outbound HTTPS connections the emulator makes: to GitHub (oauth2-proxy downloads), and to `APP_UPSTREAM` when it's `https://`. Normally not needed — the OS certificate store (Windows, macOS, Linux) is used automatically via [truststore](https://github.com/sethmlarson/truststore) (a locally-issued dev cert, e.g. mkcert, verifies once its CA is installed into that store). Set this only when your network has SSL inspection (MITM proxy) and the proxy CA cannot be added to the OS trust store, for example on Linux without root access. |
+| `HTTP20_ENABLED` | | `false` | Accept HTTP/2 on `SITE_PORT`, alongside HTTP/1.1 (additive, not exclusive — mirrors Azure App Service's "HTTP version: 2.0"). See [HTTP/2 and gRPC](../README.md#http2-and-grpc) in the main README. |
+| `HTTP20_PROXY_MODE` | | `disabled` | How much of an HTTP/2 request is preserved end to end to `APP_UPSTREAM` (mirrors Azure App Service's `http20ProxyFlag`): `disabled` downgrades everything to HTTP/1.1 (breaks gRPC); `all` relays everything as HTTP/2 (`APP_UPSTREAM` must speak HTTP/2); `grpc-only` relays only requests with a `Content-Type` of `application/grpc*`. |
 
 #### Enabling HTTPS (TLS)
 
@@ -211,7 +213,30 @@ For example: `http://localhost:8080/oauth2/callback`, or `https://xxx-8080.usw2.
 
 ### App not reachable (502 error)
 
+Several possible causes are listed below.
+
+#### 1. `APP_UPSTREAM` misconfigured or not running
+
 Verify `APP_UPSTREAM` is set correctly and your application is running on that address.
+
+#### 2. Upstream HTTP/2 header size limit (`HTTP20_PROXY_MODE = "all"` / `"grpc-only"`)
+
+If this only happens after a successful login (not on every request), the upstream may be
+rejecting the request over HTTP/2 header size limits: oauth2-proxy's session cookie can
+grow past several KB once it embeds the access/ID tokens
+(`--pass-access-token`/`--set-authorization-header`), and servers like nginx cap HTTP/2
+request header sizes by default. Check the emulator's own output for a line like:
+
+```text
+[app] upstream HTTP/2 relay to <host>:<port> (tls=True) failed: ConnectionError('no HTTP/2 response received from ... (upstream reset the stream (error_code=<ErrorCodes.ENHANCE_YOUR_CALM: 11>))')
+```
+
+If the server software behind `APP_UPSTREAM` is nginx, raise the relevant limit and
+reload: `http2_max_field_size` /
+`http2_max_header_size` (nginx before 1.19.7) or `large_client_header_buffers` (1.19.7
+onward, shared with HTTP/1.x). Otherwise, switch to `HTTP20_PROXY_MODE = "disabled"` (or
+`"grpc-only"` if only specific gRPC routes need HTTP/2) if the upstream doesn't actually
+need the rest of the request relayed as HTTP/2.
 
 ### oauth2-proxy returns HTTP 500
 

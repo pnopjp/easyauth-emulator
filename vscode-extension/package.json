@@ -136,32 +136,56 @@
             "order": 4,
             "markdownDescription": "`TLS_KEY_FILE`: Path to the TLS private key (PEM format). Set together with `TLS_CERT_FILE` to enable HTTPS. Required for Facebook Login."
           },
+          "easyauth.http20Enabled": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "order": 5,
+            "markdownDescription": "`HTTP20_ENABLED`: Accept HTTP/2 on `site.port`, alongside HTTP/1.1 (additive, not exclusive). See the main README's [\"HTTP/2 and gRPC\"](https://github.com/pnopjp/easyauth-emulator#http2-and-grpc) section."
+          },
+          "easyauth.http20ProxyMode": {
+            "type": "string",
+            "default": "disabled",
+            "scope": "resource",
+            "order": 6,
+            "enum": [
+              "disabled",
+              "all",
+              "grpc-only"
+            ],
+            "enumDescriptions": [
+              "Downgrade every request to the upstream app to HTTP/1.1 (breaks gRPC, fine otherwise).",
+              "Relay every request to the upstream app as HTTP/2 (the upstream app must speak HTTP/2).",
+              "Relay only requests with a Content-Type of application/grpc* as HTTP/2; everything else is downgraded to HTTP/1.1."
+            ],
+            "markdownDescription": "`HTTP20_PROXY_MODE`: How much of an HTTP/2 request is preserved end to end to the upstream app. Only takes effect when `http20Enabled` is on."
+          },
           "easyauth.defaultIdp": {
             "type": "string",
             "default": "",
             "scope": "resource",
-            "order": 5,
+            "order": 7,
             "markdownDescription": "`DEFAULT_IDP`: Default IDP when `/.auth/login` is accessed. Must match a name in the configured IDPs. Leave empty to auto-select when only one IDP is configured, or to show the selection screen when multiple IDPs are configured."
           },
           "easyauth.skipAuthRoutes": {
             "type": "string",
             "default": "",
             "scope": "resource",
-            "order": 6,
+            "order": 8,
             "markdownDescription": "`SKIP_AUTH_ROUTES`: Routes that bypass authentication and are forwarded directly to upstream. Comma-separated list of `[METHOD=]REGEX` patterns.\n\n**Example:** `GET=^/health$,^/public/`"
           },
           "easyauth.debugHeadersEndpointEnabled": {
             "type": "boolean",
             "default": false,
             "scope": "resource",
-            "order": 7,
+            "order": 9,
             "markdownDescription": "`DEBUG_HEADERS_ENDPOINT_ENABLED`: Enable `GET /.debug/headers` endpoint to inspect computed auth headers."
           },
           "easyauth.idpSelectIcons": {
             "type": "string",
             "default": "simple",
             "scope": "resource",
-            "order": 8,
+            "order": 10,
             "enum": [
               "simple",
               "generic",

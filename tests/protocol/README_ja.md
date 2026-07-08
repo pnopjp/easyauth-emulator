@@ -76,10 +76,26 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
      - Pythonの`grpc`パッケージは即座に失敗: `grpc.RpcError: UNAVAILABLE — Failed parsing HTTP/2 (Expected SETTINGS frame as the first frame, ...)`
      - Go実装の`grpcurl`は自身のダイヤルタイムアウトまで待って失敗: `Failed to dial target host "localhost:<port>": context deadline exceeded`。これが出た場合、先に`curl http://localhost:<SITE_PORT>/healthz`が`ok`を返すか確認し、「何も起動していない」だけの状態ではないことを確かめてください。
 
+     これは無条件の欠落ではなく、現在は**既定の挙動**です。gRPC対応は`HTTP20_ENABLED`/`HTTP20_PROXY_MODE`
+     でオプトインできます（メインREADMEの[「HTTP/2とgRPC」](../../README_ja.md#http2とgrpc)を参照）。
+     これらを設定すれば同じ呼び出しが成功します — `tests/python/test_protocol_gaps.py`の
+     `test_grpc_call_through_gateway`に動作例があります（別のゲートウェイインスタンスで
+     `HTTP20_ENABLED=true`/`HTTP20_PROXY_MODE=grpc-only`を設定）。
+
 ## ファイル構成
 
 - `app.py` — HTTP + gRPCの検証用サーバー
 - `send_chunked.py` — `Transfer-Encoding: chunked`のPOSTを複数の実チャンクに分けて送信する(使い方は上記「直接アクセスでの確認」参照)
+- `send_http2.py` — 平文HTTP/2（h2c）で1リクエストを送信しレスポンスを表示する。`HTTP20_ENABLED`を
+  通常の（gRPCでない）ルートに対してテストするためのもの。Windows版curlは通常HTTP/2に非対応
+  （`curl --version`のFeaturesに"HTTP2"が出ない）ため、代わりに使う。gRPC自体は`grpcurl`か本物の
+  gRPCクライアントを使うこと。
+
+  ```bash
+  python -m tests.protocol.send_http2 localhost 8080 /healthz
+  python -m tests.protocol.send_http2 localhost 8080 /.auth/login
+  ```
+
 - `echo.proto` — gRPCの最小サービス定義
 - `echo_pb2.py`、`echo_pb2_grpc.py` — `echo.proto`から生成済み。再生成する場合:
 
