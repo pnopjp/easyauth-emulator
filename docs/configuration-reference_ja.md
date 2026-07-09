@@ -201,7 +201,7 @@ HTTP20_PROXY_MODE = "grpc-only"  # "disabled" | "all" | "grpc-only"
 - クライアント側のHTTP/2受け入れは、平文（h2c）と、`TLS_CERT_FILE`/`TLS_KEY_FILE`設定時のTLS+ALPNネゴシエーションの両方に対応しています。実際のブラウザ（TLS経由でのみHTTP/2を交渉）と同じ挙動です。
 - `APP_UPSTREAM`は`https://`でも指定できます。`HTTP20_PROXY_MODE = "disabled"`（TLS上でHTTP/1.1として中継）と`"all"`/`"grpc-only"`（TLS+ALPNでHTTP/2として中継。`h2`がネゴシエートされない場合は失敗）の両方で対応します。証明書検証は`SSL_CA_BUNDLE`が設定されていればそれを、なければOSの証明書ストアを使用します。mkcert等で発行したローカル開発用証明書も、そのCAをOSストアにインストール済みであれば追加設定なしで検証できます。
 - 既定では`SITE_PORT`を他の全てと共有します。Azure Container Appsの単一ingress方式に近い設計です。App Service方式の別ポートを模すには`APPSERVICE_HTTP20_ONLY_PORT`を設定してください（後述の「Azure App Serviceを模す場合の設定」参照）。
-- `APP_UPSTREAM`へのHTTP/2中継は単項リクエスト/レスポンスのみです（既存のHTTP/1.1版`_proxy_to`も双方向を全部バッファリングする実装なので、それと同じ制約です）。汎用的な双方向ストリーミング対応のgRPCクライアントではありません。
+- `APP_UPSTREAM`への中継は、HTTP/1.1・HTTP/2どちらの経路も、応答を全部バッファリングしてからではなく届いた分から順にクライアントへ流します。これにより`HTTP20_PROXY_MODE`の値に関わらずSSE等のストリーミングエンドポイントが動作します。ただしリクエストボディは今も単一のDATAフレームで送信するのみで、汎用的な双方向ストリーミング対応のgRPCクライアントではありません。
 
 ##### Azure Container Appsを模す場合の設定
 

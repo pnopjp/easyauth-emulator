@@ -1,6 +1,6 @@
 # プロトコル欠落 検証アプリ
 
-`ToDo.md`に記載のプロトコル欠落（WebSocket、gRPC、SSE/ストリーミング、chunkedリクエストボディ）を確認するための手動検証用アプリ。単独動作で、`start.py`や`config.toml`には統合していません（`src/sample_app.py`とは異なる位置づけ）。
+WebSocket、gRPC、SSE/ストリーミング、chunkedリクエストボディまわりのプロトコル挙動を確認するための手動検証用アプリ（WebSocketのみ`ToDo.md`記載の未対応項目として残っている）。単独動作で、`start.py`や`config.toml`には統合していません（`src/sample_app.py`とは異なる位置づけ）。
 
 ## セットアップ
 
@@ -53,7 +53,7 @@ gRPCは以下で確認します。
 grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
 ```
 
-## ゲートウェイ経由での確認（壊れるはず）
+## ゲートウェイ経由での確認
 
 1. エミュレーターの`config.toml`に以下を設定します。
 
@@ -67,11 +67,11 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
    SKIP_AUTH_ROUTES = "/ws/,/sse/,/chunked/"
    ```
 
-3. エミュレーターを起動し、ポート8082ではなく`http://localhost:<SITE_PORT>/`（ゲートウェイ）を開いて同じ確認を行います。実機確認済みの挙動（2026-07-07時点、本アプリ vs `main`ブランチの`src/app.py`）は以下の通りです。
+3. エミュレーターを起動し、ポート8082ではなく`http://localhost:<SITE_PORT>/`（ゲートウェイ）を開いて同じ確認を行います。現状の挙動は以下の通りです。
 
-   - **WebSocket** — ゲートウェイは`400 Bad Request`を返す。ゲートウェイ自身のヘッダーとupstreamの`101`応答のヘッダーが混在した壊れた応答になっており、Upgradeハンドシェイクを中継できていない。
-   - **SSE** — イベントが1つずつ届かず、upstreamの応答が完了する約10秒後（`PROTOCOL_APP_SSE_COUNT` × `PROTOCOL_APP_SSE_INTERVAL_SECONDS`、既定は10×1秒）に**全部まとめて**届く。`_proxy_to`が応答を全部読み切ってから返しているため（[app.py:606](../../src/app.py#L606)）。ストリームがプロキシ側のupstream読み取りタイムアウト（30秒、[app.py:603](../../src/app.py#L603)）より長く続く場合は、`502`で失敗する。
-   - **chunkedボディ** — `received_bytes`が`0`で返る（`Transfer-Encoding: chunked`かつ`Content-Length`なしの本文が黙って欠落する）。curl（本文を1チャンクで送信）と`send_chunked.py`（複数の実チャンクで送信）の両方で確認済みで、結果は同じ。`_proxy_to`は`Content-Length`ヘッダーの有無しか見ていない（[app.py:598-599](../../src/app.py#L598-L599)）ため、チャンク数は結果に影響しない。
+   - **WebSocket** — ゲートウェイは`400 Bad Request`を返す。ゲートウェイ自身のヘッダーとupstreamの`101`応答のヘッダーが混在した壊れた応答になっており、Upgradeハンドシェイクを中継できていない（実機確認済み、`ToDo.md`記載の未対応項目）。
+   - **SSE** — 正しく動作します。イベントは届いた分から順にストリーミングで中継され、upstreamの応答が完了するまでバッファリングされることはありません（`_proxy_to`のHTTP/1.1中継・`HTTP20_PROXY_MODE=all`時の`_http2_relay_request`によるHTTP/2中継の両方で対応済み）。
+   - **chunkedボディ** — 正しく動作します。`Transfer-Encoding: chunked`のボディはデコードされてから中継され、`received_bytes`は送信した本文の長さと一致します。
    - **gRPC** — 同じ`grpcurl`/gRPCクライアントをゲートウェイの`SITE_PORT`に対して実行すると失敗する。根本原因（ゲートウェイがHTTP/1.1専用でgRPCが要求するHTTP/2接続をネゴシエートできない）は同じでも、クライアント実装によって症状が異なります。
      - Pythonの`grpc`パッケージは即座に失敗: `grpc.RpcError: UNAVAILABLE — Failed parsing HTTP/2 (Expected SETTINGS frame as the first frame, ...)`
      - Go実装の`grpcurl`は自身のダイヤルタイムアウトまで待って失敗: `Failed to dial target host "localhost:<port>": context deadline exceeded`。これが出た場合、先に`curl http://localhost:<SITE_PORT>/healthz`が`ok`を返すか確認し、「何も起動していない」だけの状態ではないことを確かめてください。

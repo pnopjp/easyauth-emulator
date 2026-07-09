@@ -219,9 +219,11 @@ Notes:
 - By default, gRPC shares `SITE_PORT` with everything else, matching Azure Container Apps'
   single-ingress model. To emulate App Service's separate port instead, set
   `APPSERVICE_HTTP20_ONLY_PORT` (see "Configuring for Azure App Service" below).
-- The relay to `APP_UPSTREAM` over HTTP/2 is unary request/response only (matching
-  `_proxy_to`'s existing HTTP/1.1 behavior, which also fully buffers both directions) — not
-  a general bidirectional-streaming gRPC client.
+- Both relay paths to `APP_UPSTREAM` (HTTP/1.1 and HTTP/2) forward the response as it
+  arrives rather than buffering it in memory first — this is what lets a streaming
+  endpoint (SSE, etc.) work under any `HTTP20_PROXY_MODE`. The request body, though, is
+  still sent as a single DATA frame either way — not a general bidirectional-streaming
+  gRPC client.
 
 ##### Configuring for Azure Container Apps
 

@@ -3,11 +3,15 @@ Regression tests for the protocol gaps tracked in ToDo.md: WebSocket,
 SSE/streaming, chunked request bodies, and gRPC. Automates the manual
 procedure in tests/protocol/README.md.
 
-WebSocket/SSE/chunked-body tests assert the CORRECT (fully working) behavior
-and are marked xfail(strict=True): they currently fail because the gap is
-real, and will flip to an unexpected pass once the gap is closed — pytest
-reports that as a failure (strict=True), which is the signal to remove the
-xfail marker.
+The WebSocket test asserts the CORRECT (fully working) behavior and is
+marked xfail(strict=True): it currently fails because the gap is real, and
+will flip to an unexpected pass once the gap is closed — pytest reports that
+as a failure (strict=True), which is the signal to remove the xfail marker.
+The chunked-request-body and SSE/streaming gaps have both been closed
+(_read_request_body now decodes Transfer-Encoding: chunked; _proxy_to's
+HTTP/1.1 relay now streams the upstream response incrementally via
+_stream_response instead of buffering it), so those tests assert success
+directly.
 
 gRPC is implemented (as of the HTTP/2 support work) but is opt-in — off by
 default, like App Service's own http20ProxyFlag. test_grpc_call_through_gateway
@@ -318,12 +322,12 @@ def test_websocket_upgrade_and_echo_through_gateway(gateway_port):
         assert echoed == bytes([0x81, len(payload)]) + payload
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ToDo.md: SSE/streaming is not supported "
-           "(_proxy_to buffers the full upstream response before replying)",
-)
 def test_sse_streamed_incrementally_through_gateway(gateway_port):
+    """The verification app sends one SSE event per second
+    (SSE_EVENT_COUNT=10 by default) with no Content-Length, relying on
+    connection-close to mark the end. A real incremental relay delivers each
+    one promptly; a buffered relay would hang until all 10 arrive (~10s)
+    before sending anything at all."""
     port = gateway_port
     request = f"GET /sse/stream HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
     with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
@@ -335,12 +339,16 @@ def test_sse_streamed_incrementally_through_gateway(gateway_port):
             pytest.fail("no data arrived within 3s — the response is being buffered instead of streamed")
         assert first_bytes, "connection closed immediately with no data"
 
+        # A second read should also arrive promptly — proof of genuine
+        # incremental delivery, not just a first chunk that happened to
+        # include the response headers plus a coincidentally-fast reply.
+        try:
+            second_bytes = sock.recv(4096)
+        except socket.timeout:
+            pytest.fail("no further data arrived within 3s of the first chunk — looks buffered, not streamed")
+        assert second_bytes, "connection closed after the first chunk with no further data"
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ToDo.md: chunked request bodies are dropped "
-           "(_proxy_to only reads a body when Content-Length is present)",
-)
+
 def test_chunked_request_body_forwarded_through_gateway(gateway_port):
     port = gateway_port
     text = "chunked request body test"

@@ -67,21 +67,30 @@ push v*.*.*
 
 **依存パッケージ:** `requirements-test.txt`（`grpcio` 等。`requirements.txt` — 配布バイナリ用 — とは分離）
 
-`ToDo.md` に記載のプロトコル欠落（WebSocket・gRPC・SSE/ストリーミング・chunkedリクエスト
-ボディ）を、ゲートウェイ（`src/app.py`）と検証用アプリ（`tests/protocol/app.py`）を実際に
-サブプロセスとして起動して確認します。認証は `SKIP_AUTH_ROUTES` で迂回します — 認証済み
-経由でも迂回経由でも `_proxy_to` の呼び出しは同一コードパスのため、代替として妥当です。
+WebSocket・gRPC・SSE/ストリーミング・chunkedリクエストボディ・`APPSERVICE_HTTP20_ONLY_PORT`
+まわりの挙動を、ゲートウェイ（`src/app.py`）と検証用アプリ（`tests/protocol/app.py`）を実際に
+サブプロセスとして起動して確認します。認証は`SKIP_AUTH_ROUTES`で迂回します — 認証済み
+経由でも迂回経由でも`_proxy_to`の呼び出しは同一コードパスのため、代替として妥当です。
 
-各テストは「正しく動く」ことをアサートし、`@pytest.mark.xfail(strict=True)` を付けています。
-現状は欠落しているため失敗（`XFAIL`）しますが、将来対応が実装されて予期せず成功すると
-`XPASS(strict)` として**失敗**扱いになり、`xfail` マーカーを外すべきタイミングを知らせます。
+WebSocketのみ現状`ToDo.md`記載の未対応項目で、そのテストだけ`@pytest.mark.xfail(strict=True)`
+を付けています。将来対応が実装されて予期せず成功すると`XPASS(strict)`として**失敗**扱いになり、
+`xfail`マーカーを外すべきタイミングを知らせます。他のテストはすべて「正しく動く」ことを
+そのままアサートします（SSE・chunkedリクエストボディの欠落は解消済み）。
 
 | テスト | 対象 |
 | --- | --- |
-| `test_websocket_upgrade_and_echo_through_gateway` | Upgradeハンドシェイクとエコー |
-| `test_sse_streamed_incrementally_through_gateway` | イベントが逐次届くか（3秒以内に何か届くか） |
-| `test_chunked_request_body_forwarded_through_gateway` | `send_chunked.py` で複数チャンク送信し、本文が欠落しないか |
-| `test_grpc_call_through_gateway` | 単項RPCが成功するか（`grpcio` 未インストール時は自動skip） |
+| `test_websocket_upgrade_and_echo_through_gateway` | Upgradeハンドシェイクとエコー（`xfail`、未対応） |
+| `test_sse_streamed_incrementally_through_gateway` | イベントがバッファリングされず1つずつ逐次届くか |
+| `test_chunked_request_body_forwarded_through_gateway` | `send_chunked.py`で複数チャンク送信し、本文が欠落しないか |
+| `test_grpc_disabled_by_default_does_not_hang` | `HTTP20_ENABLED`既定オフのゲートウェイで、gRPC呼び出しがハングせず速やかに失敗するか |
+| `test_grpc_call_through_gateway` | `HTTP20_ENABLED`/`HTTP20_PROXY_MODE=grpc-only`設定で単項RPCが成功するか（`grpcio`未インストール時は自動skip） |
+| `test_http20_disabled_forces_http1_upstream_even_when_proxy_mode_is_all` | `HTTP20_ENABLED=false`のとき、`HTTP20_PROXY_MODE=all`でもHTTP/1.1で中継されるか |
+| `test_appservice_dedicated_port_listens_http2_even_when_http20_disabled` | `APPSERVICE_HTTP20_ONLY_PORT`が`HTTP20_ENABLED`に関わらず常にHTTP/2でリッスンするか |
+| `test_appservice_dedicated_port_relays_grpc_regardless_of_proxy_mode` | 同ポートが`HTTP20_PROXY_MODE`に関わらず常にHTTP/2で中継するか |
+| `test_unauthenticated_grpc_via_dedicated_port_fails_fast` | 同ポート宛の未認証gRPC呼び出しがハングせず速やかに失敗するか |
+| `test_site_port_stops_detecting_grpc_when_dedicated_port_is_set` | 別ポート設定時、`SITE_PORT`側がContent-TypeによるgRPC判定をやめてHTTP/1.1にフォールバックするか |
+| `test_dedicated_port_still_works_when_site_port_downgrades` | 上記と同時に、別ポート自体は変わらずHTTP/2で動作するか |
+| `test_appservice_port_same_as_site_port_fails_fast` | `APPSERVICE_HTTP20_ONLY_PORT`が`SITE_PORT`と同じ値だと起動時エラーになるか |
 
 手動での確認手順・実機確認済みの現状挙動は `tests/protocol/README_ja.md` を参照してください。
 

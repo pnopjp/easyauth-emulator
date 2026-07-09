@@ -1,8 +1,8 @@
 # Protocol gap verification app
 
-Manual verification app for the protocol gaps tracked in `ToDo.md`: WebSocket, gRPC,
-SSE/streaming, and chunked request bodies. Standalone — not wired into `start.py` or
-`config.toml` (unlike `src/sample_app.py`).
+Manual verification app for protocol behavior around WebSocket, gRPC, SSE/streaming, and
+chunked request bodies (only WebSocket remains an unaddressed gap tracked in `ToDo.md`).
+Standalone — not wired into `start.py` or `config.toml` (unlike `src/sample_app.py`).
 
 ## Setup
 
@@ -64,7 +64,7 @@ For gRPC:
 grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
 ```
 
-## Verify through the gateway (expected to break)
+## Verify through the gateway
 
 1. In the emulator's `config.toml`, set:
 
@@ -80,25 +80,17 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
    ```
 
 3. Start the emulator, then open `http://localhost:<SITE_PORT>/` (the gateway) instead
-   of port 8082 directly, and repeat the same checks. Confirmed behavior (2026-07-07,
-   this app vs. `src/app.py` on `main`):
+   of port 8082 directly, and repeat the same checks. Current behavior:
 
    - **WebSocket** — the gateway responds `400 Bad Request` with a malformed response
      (headers from both the gateway and the upstream's `101` response are concatenated)
-     instead of relaying the Upgrade handshake.
-   - **SSE** — all events arrive at once, all within the same second, only after the
-     full ~10-second upstream response finishes (`PROTOCOL_APP_SSE_COUNT` ×
-     `PROTOCOL_APP_SSE_INTERVAL_SECONDS`, 10 × 1s by default) — `_proxy_to` reads the
-     entire response body before writing anything back
-     ([app.py:606](../../src/app.py#L606)). If the stream runs longer than the proxy's
-     30s upstream read timeout ([app.py:603](../../src/app.py#L603)), the request fails
-     with `502` instead.
-   - **Chunked body** — `received_bytes` comes back as `0` (the gateway drops bodies sent
-     with `Transfer-Encoding: chunked` and no `Content-Length`). Confirmed with both curl
-     (sends the body as a single chunk) and `send_chunked.py` (multiple real chunks) —
-     same result either way, since `_proxy_to` only ever checks for `Content-Length`
-     ([app.py:598-599](../../src/app.py#L598-L599)) regardless of how many chunks made up
-     the request.
+     instead of relaying the Upgrade handshake (confirmed, still an unaddressed gap
+     tracked in `ToDo.md`).
+   - **SSE** — works correctly. Events are relayed as they arrive rather than being
+     buffered until the upstream response completes (both `_proxy_to`'s HTTP/1.1 relay
+     and `_http2_relay_request`'s HTTP/2 relay under `HTTP20_PROXY_MODE=all` support this).
+   - **Chunked body** — works correctly. The `Transfer-Encoding: chunked` body is decoded
+     before being relayed, and `received_bytes` matches the length of the sent body.
    - **gRPC** — running the same `grpcurl`/gRPC client against the gateway's `SITE_PORT`
      instead of 8083 fails. The exact symptom depends on the client library, since both
      are surfacing the same root cause (the gateway is HTTP/1.1-only and cannot negotiate

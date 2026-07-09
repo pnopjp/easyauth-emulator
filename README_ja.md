@@ -187,8 +187,6 @@ OAUTH2_PROXY_REQUEST_LOGGING = true    # リクエストごとの HTTP ログ
 - セッション制御は oauth2-proxy の cookie と本エミュレーターのルーティング規則に基づくため、マネージド Easy Auth の内部挙動とは差分が出る場合があります。
 - WebSocket には対応していません（HTTP/1.1 のリクエスト/レスポンス型プロキシのみ）。
 - gRPCは対応していますが既定オフ・オプトイン方式です — [HTTP/2とgRPC](docs/configuration-reference_ja.md#http2とgrpc)を参照してください。Azure App Serviceの`http20ProxyFlag`が既定で無効なのと同じ位置づけです。
-- Server-Sent Events (SSE) など、レスポンスをストリーミングするエンドポイントには対応していません。プロキシが upstream からの応答を全て読み切ってから返すため、応答が完了しないエンドポイントはハングします。
-- `Transfer-Encoding: chunked`（`Content-Length` なし）で送られたリクエストボディは、アプリケーションへ転送されません。
 
 ## 非対応プロバイダー
 

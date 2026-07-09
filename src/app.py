@@ -560,6 +560,27 @@ class _RoutingMixin:
         """Used only by _proxy_to to relay an upstream response's headers verbatim."""
         raise NotImplementedError
 
+    def _stream_response(self, status: int, headers: "list[tuple[str, str]]",
+                          chunks: "Iterable[bytes]") -> None:
+        """Used only by _proxy_to's HTTP/1.1 upstream relay, to forward a
+        response as its bytes arrive rather than buffering it all in memory
+        first — the difference that makes SSE/streaming endpoints work
+        instead of hanging until the upstream response completes."""
+        raise NotImplementedError
+
+    def _stream_response_with_trailers(self, status: int, headers: "list[tuple[str, str]]",
+                                        chunks: "Iterable[bytes]", get_trailers) -> None:
+        """Used only by _proxy_to's HTTP/2 upstream relay (HTTP20_PROXY_MODE
+        "all"/"grpc-only"), to forward a response as it arrives. get_trailers
+        is called only once chunks is fully exhausted and returns the
+        trailers list (e.g. gRPC's grpc-status/grpc-message) collected along
+        the way, or None. Trailers are meaningless over HTTP/1.1, and a
+        genuine gRPC call can only ever arrive over a real HTTP/2 connection
+        in the first place, so the default here just streams and ignores
+        get_trailers — _Http2StreamHandler overrides this to send trailers as
+        an actual trailing HEADERS frame."""
+        self._stream_response(status, headers, chunks)
+
     def _send_response_with_trailers(self, status: int, headers: "list[tuple[str, str]]",
                                        body: bytes, trailers: "list[tuple[str, str]]") -> None:
         """Used only by _proxy_to when relaying an HTTP/2 upstream response (e.g.
@@ -726,14 +747,37 @@ class _RoutingMixin:
         upstream_tls = parsed.scheme == "https"
 
         if relay_as_http2:
+            relay = _http2_relay_request(host, port, self.command, req_path, headers, body, tls=upstream_tls)
             try:
-                status, resp_headers, resp_body, resp_trailers = _http2_relay_request(
-                    host, port, self.command, req_path, headers, body, tls=upstream_tls
-                )
-                self._send_response_with_trailers(status, resp_headers, resp_body, resp_trailers)
+                kind, status, resp_headers = next(relay)
+                assert kind == "status"
             except Exception as exc:
                 print(f"[app] upstream HTTP/2 relay to {host}:{port} (tls={upstream_tls}) failed: {exc!r}", file=sys.stderr)
                 self._send_empty(502)
+                return
+
+            # relay is exhausted by _iter_relay_data below; get_trailers is
+            # only meaningful (and only called) once that's happened, since
+            # the "trailers" item is always the last thing the generator
+            # yields — see _http2_relay_request's own docstring.
+            trailers_box: "list[list[tuple[str, str]]]" = []
+
+            def _iter_relay_data():
+                for item in relay:
+                    if item[0] == "data":
+                        yield item[1]
+                    elif item[0] == "trailers":
+                        trailers_box.append(item[1])
+
+            try:
+                self._stream_response_with_trailers(
+                    status, resp_headers, _iter_relay_data(),
+                    lambda: (trailers_box[0] if trailers_box else None),
+                )
+            except Exception as exc:
+                # Headers are already committed to the real client by this
+                # point, so there's no clean error response left to send.
+                print(f"[app] upstream HTTP/2 stream from {host}:{port} (tls={upstream_tls}) failed: {exc!r}", file=sys.stderr)
             return
 
         conn: "http.client.HTTPConnection | None" = None
@@ -744,21 +788,53 @@ class _RoutingMixin:
                 conn = http.client.HTTPConnection(host, port, timeout=30)
             conn.request(self.command, req_path, body=body, headers=headers)
             resp = conn.getresponse()
-            resp_body = resp.read()
-
-            skip = _HOP_BY_HOP | frozenset({"content-length"})
-            resp_headers = [(hname, hvalue) for hname, hvalue in resp.getheaders() if hname.lower() not in skip]
-            resp_headers.append(("Content-Length", str(len(resp_body))))
-            self._send_raw_response(resp.status, resp_headers, resp_body)
         except Exception as exc:
             print(f"[app] upstream HTTP/1.1 relay to {host}:{port} (tls={upstream_tls}) failed: {exc!r}", file=sys.stderr)
             self._send_empty(502)
-        finally:
             if conn is not None:
                 try:
                     conn.close()
                 except Exception:
                     pass
+            return
+
+        # Streamed rather than buffered — resp.read(n) yields data as it
+        # arrives (transparently de-chunking if the upstream used
+        # Transfer-Encoding: chunked itself), which is what lets a
+        # slow/unbounded response (SSE, etc.) reach the client incrementally
+        # instead of hanging here until the upstream response completes.
+        # Content-Length (if the upstream gave one) is passed through as-is —
+        # only Transfer-Encoding is hop-by-hop and stripped, so an ordinary
+        # complete response keeps its exact original framing; _stream_response
+        # only switches to chunked encoding when there's no length to give.
+        resp_headers = [(hname, hvalue) for hname, hvalue in resp.getheaders() if hname.lower() not in _HOP_BY_HOP]
+
+        def _iter_upstream_chunks():
+            while True:
+                # read1, not read: plain read(n) blocks until n bytes have
+                # arrived (or EOF) even if less is immediately available,
+                # which for a slow-trickle response (SSE, etc.) would just
+                # reintroduce buffering — read1 returns as soon as anything
+                # is available, via at most one underlying raw read. The
+                # 16384 cap keeps any single chunk under the default HTTP/2
+                # flow-control window (65535 bytes) so it never needs
+                # splitting when the client side of this response is HTTP/2.
+                chunk = resp.read1(16384)
+                if not chunk:
+                    return
+                yield chunk
+
+        try:
+            self._stream_response(resp.status, resp_headers, _iter_upstream_chunks())
+        except Exception as exc:
+            # Headers may already be on the wire by this point, so there's no
+            # clean error response left to send — just log and give up.
+            print(f"[app] upstream HTTP/1.1 stream from {host}:{port} (tls={upstream_tls}) failed: {exc!r}", file=sys.stderr)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     # --- Route handlers ---
 
@@ -1092,8 +1168,28 @@ class _Handler(BaseHTTPRequestHandler, _RoutingMixin):
         return "https" if isinstance(self.connection, ssl.SSLSocket) else "http"
 
     def _read_request_body(self) -> "bytes | None":
+        if "chunked" in (self.headers.get("Transfer-Encoding", "") or "").lower():
+            return self._read_chunked_body() or None
         content_length = int(self.headers.get("Content-Length", 0) or 0)
         return self.rfile.read(content_length) if content_length > 0 else None
+
+    def _read_chunked_body(self) -> bytes:
+        """Decode a Transfer-Encoding: chunked request body. _proxy_to relays
+        the result as an ordinary sized body — Transfer-Encoding is hop-by-hop
+        (_HOP_BY_HOP) and already stripped before forwarding, and http.client
+        computes a fresh Content-Length from the decoded bytes on its own."""
+        chunks = []
+        while True:
+            size_line = self.rfile.readline().strip()
+            if not size_line:
+                break
+            size = int(size_line.split(b";")[0], 16)
+            if size == 0:
+                self.rfile.readline()
+                break
+            chunks.append(self.rfile.read(size))
+            self.rfile.readline()
+        return b"".join(chunks)
 
     def _send_text(self, text: str, status: int = 200) -> None:
         body = text.encode("utf-8")
@@ -1143,6 +1239,39 @@ class _Handler(BaseHTTPRequestHandler, _RoutingMixin):
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _stream_response(self, status: int, headers: "list[tuple[str, str]]", chunks) -> None:
+        # If the upstream gave a Content-Length, keep it — the response has a
+        # known length, so it's streamed with its original, exact framing
+        # (matching this emulator's long-standing behavior for ordinary
+        # responses). Only when there's no length upfront (SSE, etc.) does
+        # this switch to Transfer-Encoding: chunked, a standard HTTP/1.1
+        # mechanism every real client already handles transparently.
+        has_content_length = any(name.lower() == "content-length" for name, _ in headers)
+        self.send_response(status)
+        for name, value in headers:
+            self.send_header(name, value)
+        if not has_content_length:
+            self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        try:
+            if has_content_length:
+                for chunk in chunks:
+                    if chunk:
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                return
+            for chunk in chunks:
+                if not chunk:
+                    continue
+                self.wfile.write(b"%x\r\n" % len(chunk))
+                self.wfile.write(chunk)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+        except (ConnectionError, OSError):
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -1238,6 +1367,35 @@ class _Http2StreamHandler(_RoutingMixin):
 
     def _send_response(self, status: int, headers: "list[tuple[str, str]]", body: bytes) -> None:
         self._conn.send_stream_response(self._stream_id, status, headers, body)
+
+    def _stream_response(self, status: int, headers: "list[tuple[str, str]]", chunks) -> None:
+        # HTTP/2 frames data incrementally natively (no Content-Length or
+        # chunked-encoding trick needed) — just send each chunk as its own
+        # DATA frame and end the stream once the upstream response does.
+        self._conn.send_stream_headers(self._stream_id, status, headers)
+        try:
+            for chunk in chunks:
+                if chunk:
+                    self._conn.send_stream_data(self._stream_id, chunk)
+        except Exception:
+            pass
+        finally:
+            self._conn.end_stream(self._stream_id)
+
+    def _stream_response_with_trailers(self, status: int, headers: "list[tuple[str, str]]",
+                                        chunks, get_trailers) -> None:
+        self._conn.send_stream_headers(self._stream_id, status, headers)
+        try:
+            for chunk in chunks:
+                if chunk:
+                    self._conn.send_stream_data(self._stream_id, chunk)
+        except Exception:
+            pass
+        trailers = get_trailers()
+        if trailers:
+            self._conn.send_stream_trailers(self._stream_id, trailers)
+        else:
+            self._conn.end_stream(self._stream_id)
 
 
 class _Http2Connection:
@@ -1348,6 +1506,47 @@ class _Http2Connection:
                 return
             self._flush()
 
+    def send_stream_headers(self, stream_id: int, status: int, headers: "list[tuple[str, str]]") -> None:
+        """Start a streamed response: headers only, stream left open for
+        send_stream_data calls. Used by _stream_response for SSE/streaming
+        upstream responses — HTTP/2 frames data incrementally natively, so
+        (unlike the HTTP/1.1 transport) no chunked-encoding trick is needed."""
+        with self._write_lock:
+            response_headers = [(":status", str(status))]
+            response_headers.extend((name, value) for name, value in headers if name.lower() != "content-length")
+            try:
+                self._conn.send_headers(stream_id, response_headers)
+            except h2.exceptions.StreamClosedError:
+                return
+            self._flush()
+
+    def send_stream_data(self, stream_id: int, data: bytes) -> None:
+        with self._write_lock:
+            try:
+                self._conn.send_data(stream_id, data, end_stream=False)
+            except (h2.exceptions.StreamClosedError, h2.exceptions.FlowControlError):
+                return
+            self._flush()
+
+    def end_stream(self, stream_id: int) -> None:
+        with self._write_lock:
+            try:
+                self._conn.send_data(stream_id, b"", end_stream=True)
+            except h2.exceptions.StreamClosedError:
+                return
+            self._flush()
+
+    def send_stream_trailers(self, stream_id: int, trailers: "list[tuple[str, str]]") -> None:
+        """Ends the stream with a trailing HEADERS frame (e.g. gRPC's
+        grpc-status/grpc-message) instead of an empty terminating DATA
+        frame."""
+        with self._write_lock:
+            try:
+                self._conn.send_headers(stream_id, trailers, end_stream=True)
+            except h2.exceptions.StreamClosedError:
+                return
+            self._flush()
+
     def _flush(self) -> None:
         with self._write_lock:
             data = self._conn.data_to_send()
@@ -1363,24 +1562,32 @@ _H2_REQUEST_PSEUDO_HEADERS = frozenset({":method", ":path", ":scheme", ":authori
 
 def _http2_relay_request(host: str, port: int, method: str, path: str,
                           headers: "dict[str, str]", body: "bytes | None",
-                          tls: bool = False
-                          ) -> "tuple[int, list[tuple[str, str]], bytes, list[tuple[str, str]]]":
+                          tls: bool = False):
     """Relay one request to APP_UPSTREAM over a fresh HTTP/2 connection —
     plaintext (h2c) or, when tls=True, TLS with ALPN "h2" negotiation
-    (required by upstreams like nginx that only ever speak HTTP/2 over TLS) —
-    and collect the full response. Used by _proxy_to for HTTP20_PROXY_MODE
-    "all"/"grpc-only". Unary request/response only: the request body (if any)
-    is sent as a single DATA frame and the full response (headers, body,
-    trailers) is collected before returning, mirroring _proxy_to's existing
-    HTTP/1.1 path — not a general bidirectional-streaming gRPC client."""
+    (required by upstreams like nginx that only ever speak HTTP/2 over TLS).
+    Used by _proxy_to for HTTP20_PROXY_MODE "all"/"grpc-only". The request
+    body (if any) is still sent as a single DATA frame (not a general
+    bidirectional-streaming gRPC client) but the response is a generator,
+    yielding it to the caller incrementally rather than buffering it all in
+    memory first — this is what lets a streaming (e.g. SSE) endpoint work
+    under HTTP20_PROXY_MODE=all instead of hanging until it completes.
+
+    Yields, in order: ("status", status, resp_headers) exactly once, then
+    ("data", chunk) for each DATA frame as it arrives, then finally
+    ("trailers", resp_trailers) once the stream ends (resp_trailers may be
+    an empty list). Raises ConnectionError if no response is ever received —
+    always before the first yield, so the caller can still send a clean 502
+    in that case; once ("status", ...) has been yielded, headers are assumed
+    committed to the real client and this generator only ever ends quietly."""
     conn = h2.connection.H2Connection(config=h2.config.H2Configuration(client_side=True))
     conn.initiate_connection()
     sock = socket.create_connection((host, port), timeout=30)
-    if tls:
-        sock = _UPSTREAM_SSL_CONTEXT_H2.wrap_socket(sock, server_hostname=host)
-        if sock.selected_alpn_protocol() != "h2":
-            raise ConnectionError(f"upstream did not negotiate HTTP/2 over TLS (got {sock.selected_alpn_protocol()!r})")
     try:
+        if tls:
+            sock = _UPSTREAM_SSL_CONTEXT_H2.wrap_socket(sock, server_hostname=host)
+            if sock.selected_alpn_protocol() != "h2":
+                raise ConnectionError(f"upstream did not negotiate HTTP/2 over TLS (got {sock.selected_alpn_protocol()!r})")
         sock.sendall(conn.data_to_send())
 
         stream_id = conn.get_next_available_stream_id()
@@ -1400,10 +1607,7 @@ def _http2_relay_request(host: str, port: int, method: str, path: str,
             conn.send_data(stream_id, body, end_stream=True)
             sock.sendall(conn.data_to_send())
 
-        status = 502
-        resp_headers: "list[tuple[str, str]]" = []
         resp_trailers: "list[tuple[str, str]]" = []
-        resp_body = bytearray()
         got_response = False
         abort_reason = ""
         done = False
@@ -1414,6 +1618,8 @@ def _http2_relay_request(host: str, port: int, method: str, path: str,
             for event in conn.receive_data(data):
                 if isinstance(event, h2.events.ResponseReceived):
                     got_response = True
+                    status = 502
+                    resp_headers: "list[tuple[str, str]]" = []
                     for name, value in event.headers:
                         name = name.decode() if isinstance(name, bytes) else name
                         value = value.decode() if isinstance(value, bytes) else value
@@ -1421,9 +1627,11 @@ def _http2_relay_request(host: str, port: int, method: str, path: str,
                             status = int(value)
                         else:
                             resp_headers.append((name, value))
+                    yield ("status", status, resp_headers)
                 elif isinstance(event, h2.events.DataReceived):
-                    resp_body += event.data
                     conn.acknowledge_received_data(len(event.data), event.stream_id)
+                    if event.data:
+                        yield ("data", event.data)
                 elif isinstance(event, h2.events.TrailersReceived):
                     for name, value in event.headers:
                         name = name.decode() if isinstance(name, bytes) else name
@@ -1443,7 +1651,7 @@ def _http2_relay_request(host: str, port: int, method: str, path: str,
         if not got_response:
             reason = abort_reason or "connection closed with no data"
             raise ConnectionError(f"no HTTP/2 response received from {host}:{port} ({reason})")
-        return status, resp_headers, bytes(resp_body), resp_trailers
+        yield ("trailers", resp_trailers)
     finally:
         sock.close()
 
