@@ -141,7 +141,7 @@
             "default": false,
             "scope": "resource",
             "order": 5,
-            "markdownDescription": "`HTTP20_ENABLED`: Accept HTTP/2 on `site.port`, alongside HTTP/1.1 (additive, not exclusive). See the main README's [\"HTTP/2 and gRPC\"](https://github.com/pnopjp/easyauth-emulator#http2-and-grpc) section."
+            "markdownDescription": "`HTTP20_ENABLED`: Accept HTTP/2 on `site.port`, alongside HTTP/1.1 (additive, not exclusive). See the [\"HTTP/2 and gRPC\"](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#http2-and-grpc) section of the configuration reference."
           },
           "easyauth.http20ProxyMode": {
             "type": "string",

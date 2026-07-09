@@ -77,7 +77,7 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
      - Go実装の`grpcurl`は自身のダイヤルタイムアウトまで待って失敗: `Failed to dial target host "localhost:<port>": context deadline exceeded`。これが出た場合、先に`curl http://localhost:<SITE_PORT>/healthz`が`ok`を返すか確認し、「何も起動していない」だけの状態ではないことを確かめてください。
 
      これは無条件の欠落ではなく、現在は**既定の挙動**です。gRPC対応は`HTTP20_ENABLED`/`HTTP20_PROXY_MODE`
-     でオプトインできます（メインREADMEの[「HTTP/2とgRPC」](../../README_ja.md#http2とgrpc)を参照）。
+     でオプトインできます（設定リファレンスの[「HTTP/2とgRPC」](../../docs/configuration-reference_ja.md#http2とgrpc)を参照）。
      これらを設定すれば同じ呼び出しが成功します — `tests/python/test_protocol_gaps.py`の
      `test_grpc_call_through_gateway`に動作例があります（別のゲートウェイインスタンスで
      `HTTP20_ENABLED=true`/`HTTP20_PROXY_MODE=grpc-only`を設定）。

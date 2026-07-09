@@ -111,8 +111,8 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
        out "nothing is listening" before treating this as the same gRPC gap.
 
      This is now the *default* behavior, not an unconditional gap: gRPC support is
-     opt-in via `HTTP20_ENABLED`/`HTTP20_PROXY_MODE` (see the main README's
-     ["HTTP/2 and gRPC"](../../README.md#http2-and-grpc) section). With those set, the
+     opt-in via `HTTP20_ENABLED`/`HTTP20_PROXY_MODE` (see the configuration reference's
+     ["HTTP/2 and gRPC"](../../docs/configuration-reference.md#http2-and-grpc) section). With those set, the
      same call succeeds — see `test_grpc_call_through_gateway` in
      `tests/python/test_protocol_gaps.py` for a full worked example (separate gateway
      instance, `HTTP20_ENABLED=true`/`HTTP20_PROXY_MODE=grpc-only`).

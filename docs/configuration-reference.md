@@ -131,7 +131,7 @@ Version management behavior:
 | `TLS_CERT_FILE` | | — | Path to the TLS server certificate (PEM format). When set together with `TLS_KEY_FILE`, the emulator accepts inbound requests over HTTPS. |
 | `TLS_KEY_FILE` | | — | Path to the TLS private key (PEM format). When set together with `TLS_CERT_FILE`, the emulator accepts inbound requests over HTTPS. |
 | `SSL_CA_BUNDLE` | | — | Path to a custom CA certificate bundle (PEM format). Used for outbound HTTPS connections the emulator makes: to GitHub (oauth2-proxy downloads), and to `APP_UPSTREAM` when it's `https://`. Normally not needed — the OS certificate store (Windows, macOS, Linux) is used automatically via [truststore](https://github.com/sethmlarson/truststore) (a locally-issued dev cert, e.g. mkcert, verifies once its CA is installed into that store). Set this only when your network has SSL inspection (MITM proxy) and the proxy CA cannot be added to the OS trust store, for example on Linux without root access. |
-| `HTTP20_ENABLED` | | `false` | Accept HTTP/2 on `SITE_PORT`, alongside HTTP/1.1 (additive, not exclusive — mirrors Azure App Service's "HTTP version: 2.0"). See [HTTP/2 and gRPC](../README.md#http2-and-grpc) in the main README. |
+| `HTTP20_ENABLED` | | `false` | Accept HTTP/2 on `SITE_PORT`, alongside HTTP/1.1 (additive, not exclusive — mirrors Azure App Service's "HTTP version: 2.0"). See [HTTP/2 and gRPC](#http2-and-grpc) below. |
 | `HTTP20_PROXY_MODE` | | `disabled` | How much of an HTTP/2 request is preserved end to end to `APP_UPSTREAM` (mirrors Azure App Service's `http20ProxyFlag`): `disabled` downgrades everything to HTTP/1.1 (breaks gRPC); `all` relays everything as HTTP/2 (`APP_UPSTREAM` must speak HTTP/2); `grpc-only` relays only requests with a `Content-Type` of `application/grpc*`. |
 
 #### Enabling HTTPS (TLS)
@@ -179,6 +179,69 @@ openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
 ```
 
 Self-signed certificates cause a browser security warning.
+
+#### HTTP/2 and gRPC
+
+By default the gateway speaks HTTP/1.1 only, on the same `SITE_PORT` used for everything
+else. The HTTP/2 support added by `HTTP20_ENABLED` and `HTTP20_PROXY_MODE` (see the table
+above) is additive to HTTP/1.1 (not exclusive of it) — mirroring how Azure App Service's own
+"HTTP version: 2.0" setting works:
+
+```toml
+HTTP20_ENABLED = true            # accept HTTP/2 on SITE_PORT, alongside HTTP/1.1
+HTTP20_PROXY_MODE = "grpc-only"  # "disabled" | "all" | "grpc-only"
+```
+
+`HTTP20_PROXY_MODE` controls how much of an HTTP/2 request is preserved end to end to
+`APP_UPSTREAM`, mirroring App Service's `http20ProxyFlag`:
+
+- **`disabled`** (default) — every request to `APP_UPSTREAM` is sent as HTTP/1.1, even if
+  the client used HTTP/2. Fine for ordinary request/response traffic; breaks gRPC, whose
+  streaming and trailer-based status (`grpc-status`) cannot be represented over HTTP/1.1.
+- **`all`** — every request is relayed to `APP_UPSTREAM` as HTTP/2. Requires `APP_UPSTREAM`
+  to actually speak HTTP/2 on that port (plaintext h2c, or TLS with ALPN — e.g. nginx, which
+  only ever speaks HTTP/2 over TLS, works when `APP_UPSTREAM` is `https://`).
+- **`grpc-only`** — only requests whose `Content-Type` starts with `application/grpc` are
+  relayed as HTTP/2; everything else is downgraded to HTTP/1.1 as in `disabled`. Use this
+  when `APP_UPSTREAM` serves both a gRPC service and ordinary HTTP endpoints on the same
+  port.
+
+Notes:
+
+- Client-facing HTTP/2 accepts both plaintext (h2c) and, when `TLS_CERT_FILE`/`TLS_KEY_FILE`
+  are set, TLS with ALPN negotiation — matching how real browsers speak HTTP/2 (TLS-only).
+- `APP_UPSTREAM` may be `https://`, for both `HTTP20_PROXY_MODE = "disabled"` (relayed as
+  HTTP/1.1 over TLS) and `"all"`/`"grpc-only"` (relayed as HTTP/2 over TLS with ALPN,
+  failing if the upstream doesn't negotiate `h2`). Certificate verification uses
+  `SSL_CA_BUNDLE` if set, otherwise the OS trust store — so a locally-issued dev cert (e.g.
+  mkcert) verifies once its CA is installed into the OS store, with no extra configuration.
+- Unlike App Service (which requires a separate `HTTP20_ONLY_PORT`), gRPC here shares
+  `SITE_PORT` with everything else, matching Azure Container Apps' single-ingress model
+  instead.
+- The relay to `APP_UPSTREAM` over HTTP/2 is unary request/response only (matching
+  `_proxy_to`'s existing HTTP/1.1 behavior, which also fully buffers both directions) — not
+  a general bidirectional-streaming gRPC client.
+
+##### Configuring for Azure Container Apps
+
+Azure Container Apps ingress uses a single `transport` setting (`auto` / `http` / `http2` /
+`tcp`) that decides both the client-facing and upstream-facing protocol at once. This
+emulator splits that into two settings instead, so here's how `transport` values map onto
+them:
+
+| Container Apps `ingress.transport` | Emulator settings |
+| --- | --- |
+| `http` (HTTP/1.1 only) | `HTTP20_ENABLED = false` |
+| `http2` (HTTP/2 only, every request) | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "all"` |
+| `auto` (negotiated per connection; typical when an app serves gRPC alongside ordinary HTTP) | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "grpc-only"` |
+
+`auto` actually negotiates protocol per connection, which isn't the same mechanism as this
+emulator's `grpc-only` (which decides per request, by `Content-Type`) — but for the common
+case of "ordinary HTTP stays HTTP/1.1, gRPC calls use HTTP/2," the observable result is the
+same, which is what matters for local verification.
+
+Also note gRPC already shares `SITE_PORT` with everything else here, same as Container
+Apps' single-ingress model — no separate port to configure, unlike App Service.
 
 ### Verification App Settings
 
