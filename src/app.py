@@ -23,6 +23,13 @@ import h2.connection
 import h2.events
 import h2.exceptions
 
+# Force UTF-8 output regardless of the system locale (e.g. cp932 on Japanese
+# Windows) — same rationale as start.py's identical reconfigure call. This
+# process also runs standalone (not just as start.py's subprocess), so it
+# needs its own fix.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------

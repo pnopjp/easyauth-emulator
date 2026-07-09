@@ -41,7 +41,15 @@ from urllib.error import HTTPError
 # Paths
 # ---------------------------------------------------------------------------
 
-sys.stdout.reconfigure(line_buffering=True)
+# Force UTF-8 output regardless of the system locale (e.g. cp932 on Japanese
+# Windows) — without this, printing a non-ASCII character (an em dash, say)
+# crashes with UnicodeEncodeError whenever stdout/stderr isn't a UTF-8
+# console, which is the common case when output is redirected/piped rather
+# than shown in an interactive terminal. errors="replace" is a last-resort
+# safety net so an unexpected character degrades to a replacement glyph
+# instead of crashing.
+sys.stdout.reconfigure(line_buffering=True, encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent.resolve()))
 RUNTIME_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else BUNDLE_DIR
