@@ -223,6 +223,7 @@ The extension always passes `--config .vscode/easyauth.toml` to the emulator on 
 | `easyauth.tls.keyFile` | `""` | Path to the TLS private key file (PEM). Set with `tls.certFile` to enable HTTPS. Required for Facebook Login. |
 | `easyauth.http20Enabled` | `false` | Accept HTTP/2 on `site.port`, alongside HTTP/1.1 |
 | `easyauth.http20ProxyMode` | `disabled` | How much of an HTTP/2 request is relayed as-is to the upstream app: `disabled`, `all`, or `grpc-only` |
+| `easyauth.appserviceHttp20OnlyPort` | unset | Dedicated HTTP/2-only port for gRPC, mirroring Azure App Service's `HTTP20_ONLY_PORT` (leave unset for Azure Container Apps). Must differ from `site.port`. |
 | `easyauth.defaultIdp` | `""` | Default IdP when `/.auth/login` is accessed |
 | `easyauth.skipAuthRoutes` | `""` | Routes that bypass auth — comma-separated `[METHOD=]REGEX` patterns |
 | `easyauth.debugHeadersEndpointEnabled` | `false` | Enable `GET /.debug/headers` to inspect injected headers |

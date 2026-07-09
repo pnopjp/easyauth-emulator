@@ -55,8 +55,8 @@ DEBUG_HEADERS_ENDPOINT_ENABLED = false
 # SSL_CA_BUNDLE = ""
 
 # Accept HTTP/2 on SITE_PORT, alongside HTTP/1.1 (not exclusive of it — mirrors
-# Azure App Service's "HTTP version: 2.0"). See README.md "HTTP/2 and gRPC" for
-# details.
+# Azure App Service's "HTTP version: 2.0"). See docs/configuration-reference.md
+# "HTTP/2 and gRPC" for details.
 # HTTP20_ENABLED = false
 
 # How much of an HTTP/2 request is preserved end to end to APP_UPSTREAM
@@ -65,6 +65,14 @@ DEBUG_HEADERS_ENDPOINT_ENABLED = false
 #   all        — relay everything as HTTP/2 (APP_UPSTREAM must speak HTTP/2)
 #   grpc-only  — relay only requests with a Content-Type of application/grpc*
 # HTTP20_PROXY_MODE = "disabled"
+
+# Dedicated HTTP/2-only port for gRPC, mirroring Azure App Service's
+# HTTP20_ONLY_PORT app setting (Container Apps has no equivalent — it
+# multiplexes gRPC on SITE_PORT instead, so leave this unset for that case).
+# When set, this port always speaks HTTP/2 and always relays to APP_UPSTREAM
+# as HTTP/2, regardless of HTTP20_ENABLED/HTTP20_PROXY_MODE. Must differ from
+# SITE_PORT.
+# APPSERVICE_HTTP20_ONLY_PORT = 8082
 
 # ---- oauth2-proxy settings --------------------------------------------------
 

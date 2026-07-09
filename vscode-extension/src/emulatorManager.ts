@@ -423,6 +423,8 @@ export class EmulatorManager implements vscode.Disposable {
         }
         const http20ProxyMode = config.get<string>('http20ProxyMode', '').trim();
         if (http20ProxyMode) extra['HTTP20_PROXY_MODE'] = http20ProxyMode;
+        const appserviceHttp20OnlyPort = config.get<number | null>('appserviceHttp20OnlyPort', null);
+        if (appserviceHttp20OnlyPort !== null) extra['APPSERVICE_HTTP20_ONLY_PORT'] = String(appserviceHttp20OnlyPort);
 
         // Global IDP settings
         const defaultIdp = config.get<string>('defaultIdp', '').trim();

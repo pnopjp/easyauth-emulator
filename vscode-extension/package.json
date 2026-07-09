@@ -160,32 +160,39 @@
             ],
             "markdownDescription": "`HTTP20_PROXY_MODE`: How much of an HTTP/2 request is preserved end to end to the upstream app. Only takes effect when `http20Enabled` is on."
           },
+          "easyauth.appserviceHttp20OnlyPort": {
+            "type": ["number", "null"],
+            "default": null,
+            "scope": "resource",
+            "order": 7,
+            "markdownDescription": "`APPSERVICE_HTTP20_ONLY_PORT`: Dedicated HTTP/2-only port for gRPC, mirroring Azure App Service's `HTTP20_ONLY_PORT` app setting (leave unset for Azure Container Apps, which has no equivalent). Must differ from `site.port`. See the [\"HTTP/2 and gRPC\"](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#http2-and-grpc) section of the configuration reference."
+          },
           "easyauth.defaultIdp": {
             "type": "string",
             "default": "",
             "scope": "resource",
-            "order": 7,
+            "order": 8,
             "markdownDescription": "`DEFAULT_IDP`: Default IDP when `/.auth/login` is accessed. Must match a name in the configured IDPs. Leave empty to auto-select when only one IDP is configured, or to show the selection screen when multiple IDPs are configured."
           },
           "easyauth.skipAuthRoutes": {
             "type": "string",
             "default": "",
             "scope": "resource",
-            "order": 8,
+            "order": 9,
             "markdownDescription": "`SKIP_AUTH_ROUTES`: Routes that bypass authentication and are forwarded directly to upstream. Comma-separated list of `[METHOD=]REGEX` patterns.\n\n**Example:** `GET=^/health$,^/public/`"
           },
           "easyauth.debugHeadersEndpointEnabled": {
             "type": "boolean",
             "default": false,
             "scope": "resource",
-            "order": 9,
+            "order": 10,
             "markdownDescription": "`DEBUG_HEADERS_ENDPOINT_ENABLED`: Enable `GET /.debug/headers` endpoint to inspect computed auth headers."
           },
           "easyauth.idpSelectIcons": {
             "type": "string",
             "default": "simple",
             "scope": "resource",
-            "order": 10,
+            "order": 11,
             "enum": [
               "simple",
               "generic",

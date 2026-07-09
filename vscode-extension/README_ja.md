@@ -235,6 +235,7 @@ http://localhost:8080/oauth2/callback
 | `easyauth.tls.keyFile` | `""` | TLS 秘密鍵ファイルのパス（PEM 形式）。`tls.certFile` と合わせて設定すると HTTPS が有効になります。Facebook Login では必須。 |
 | `easyauth.http20Enabled` | `false` | `site.port`上でHTTP/1.1に加えてHTTP/2も受け付ける |
 | `easyauth.http20ProxyMode` | `disabled` | HTTP/2リクエストをどこまでそのままアップストリームアプリに中継するか: `disabled`、`all`、`grpc-only` |
+| `easyauth.appserviceHttp20OnlyPort` | 未設定 | gRPC専用のHTTP/2専用ポート（Azure App Serviceの`HTTP20_ONLY_PORT`相当。Azure Container Appsでは未設定のままでよい）。`site.port`とは異なる値にする必要があります。 |
 | `easyauth.defaultIdp` | `""` | `/.auth/login` アクセス時にデフォルトで使用する IdP |
 | `easyauth.skipAuthRoutes` | `""` | 認証をバイパスするルート — カンマ区切りの `[METHOD=]REGEX` パターン |
 | `easyauth.debugHeadersEndpointEnabled` | `false` | `GET /.debug/headers` エンドポイントを有効化（注入されたヘッダーを確認可能） |

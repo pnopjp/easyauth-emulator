@@ -131,8 +131,9 @@ Facebook Login はリダイレクト URI に HTTPS を要求します。`TLS_CER
 | `TLS_CERT_FILE` | | — | TLS サーバー証明書（PEM 形式）のパス。`TLS_KEY_FILE` とともに設定すると、エミュレーターが HTTPS でリクエストを受け付けます。 |
 | `TLS_KEY_FILE` | | — | TLS 秘密鍵（PEM 形式）のパス。`TLS_CERT_FILE` とともに設定すると、エミュレーターが HTTPS でリクエストを受け付けます。 |
 | `SSL_CA_BUNDLE` | | — | カスタム CA 証明書バンドル（PEM 形式）のパス。エミュレーター自身が HTTPS 接続する際（GitHubへのoauth2-proxyダウンロード、および`APP_UPSTREAM`が`https://`の場合）に使用します。通常は不要 — [truststore](https://github.com/sethmlarson/truststore) によって OS の証明書ストア（Windows・macOS・Linux）が自動的に参照されます（mkcert等のローカル開発用証明書も、そのCAをOSストアにインストール済みであれば検証できます）。社内ネットワークに SSL インスペクション（MITM プロキシ）があり、そのプロキシの CA を OS のストアに追加できない場合（例: Linux でルート権限がない環境）にのみ設定してください。 |
-| `HTTP20_ENABLED` | | `false` | `SITE_PORT`上でHTTP/1.1に加えてHTTP/2も受け付けるか（併用であり排他ではない — Azure App Serviceの「HTTPバージョン: 2.0」と同じ考え方）。詳細は後述の[HTTP/2とgRPC](#http2とgrpc)を参照。 |
-| `HTTP20_PROXY_MODE` | | `disabled` | HTTP/2リクエストをどこまで`APP_UPSTREAM`まで維持するか（Azure App Serviceの`http20ProxyFlag`に相当）。`disabled`は全部HTTP/1.1に変換（gRPCが壊れる）、`all`は全部HTTP/2のまま中継（`APP_UPSTREAM`がHTTP/2を話せる必要がある）、`grpc-only`は`Content-Type`が`application/grpc*`のリクエストだけHTTP/2のまま中継。 |
+| `HTTP20_ENABLED` | | `false` | `SITE_PORT`上でHTTP/1.1に加えてHTTP/2も受け付けるか（併用であり排他ではない。Azure App Serviceの「HTTPバージョン: 2.0」と同じ考え方）。詳細は後述の[HTTP/2とgRPC](#http2とgrpc)を参照。 |
+| `HTTP20_PROXY_MODE` | | `disabled` | HTTP/2リクエストを`APP_UPSTREAM`への中継でどこまで維持するか（Azure App Serviceの`http20ProxyFlag`に相当）。`disabled`は全部HTTP/1.1に変換（gRPCが壊れる）、`all`は全部HTTP/2のまま中継（`APP_UPSTREAM`がHTTP/2を話せる必要がある）、`grpc-only`は`Content-Type`が`application/grpc*`のリクエストだけHTTP/2のまま中継。`HTTP20_ENABLED`が有効なときのみ効果を持つ。無効な場合`SITE_PORT`はそもそもHTTP/2リクエストを受け付けないため、この設定に関わらず全部HTTP/1.1で中継される（`APPSERVICE_HTTP20_ONLY_PORT`だけは例外）。 |
+| `APPSERVICE_HTTP20_ONLY_PORT` | | — | gRPC専用のHTTP/2専用ポート（Azure App Serviceの`HTTP20_ONLY_PORT`アプリ設定に相当。Azure Container Appsには対応する概念がなく、未設定のままでよい）。設定すると、このポートは常にHTTP/2でリッスンし、`APP_UPSTREAM`へも常にHTTP/2で中継する（`HTTP20_ENABLED`/`HTTP20_PROXY_MODE`の値に関わらず）。`SITE_PORT`と異なる値にする必要がある。詳細は後述の[HTTP/2とgRPC](#http2とgrpc)を参照。 |
 
 #### HTTPS (TLS) を有効にする
 
@@ -182,25 +183,25 @@ openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
 
 #### HTTP/2とgRPC
 
-既定では、このゲートウェイは`SITE_PORT`上でHTTP/1.1のみを話します。`HTTP20_ENABLED`と`HTTP20_PROXY_MODE`（上表参照）で追加されるHTTP/2対応は、既存のHTTP/1.1と**併用**であり、排他ではありません——Azure App Serviceの「HTTPバージョン: 2.0」設定と同じ考え方です。
+既定では、このゲートウェイは`SITE_PORT`上でHTTP/1.1のみを話します。`HTTP20_ENABLED`と`HTTP20_PROXY_MODE`（上表参照）で追加されるHTTP/2対応は、既存のHTTP/1.1と**併用**であり、排他ではありません。Azure App Serviceの「HTTPバージョン: 2.0」設定と同じ考え方です。
 
 ```toml
 HTTP20_ENABLED = true            # SITE_PORT上でHTTP/1.1と併せてHTTP/2も受け付ける
 HTTP20_PROXY_MODE = "grpc-only"  # "disabled" | "all" | "grpc-only"
 ```
 
-`HTTP20_PROXY_MODE`は、HTTP/2リクエストをどこまで`APP_UPSTREAM`まで維持するかを制御します。Azure App Serviceの`http20ProxyFlag`に相当します。
+`HTTP20_PROXY_MODE`は、HTTP/2リクエストを`APP_UPSTREAM`への中継でどこまで維持するかを制御します。Azure App Serviceの`http20ProxyFlag`に相当します。
 
-- **`disabled`**（既定）— `APP_UPSTREAM`への全リクエストをHTTP/1.1で送信します（クライアントがHTTP/2を使っていても同様）。通常のリクエスト/レスポンス型通信には問題ありませんが、gRPCは壊れます——ストリーミングやtrailerでのステータス通知（`grpc-status`）はHTTP/1.1では表現できません。
-- **`all`** — 全リクエストをHTTP/2のまま`APP_UPSTREAM`に中継します。`APP_UPSTREAM`がそのポートで実際にHTTP/2を話せる必要があります（平文h2c、またはTLS+ALPN——nginxのようにHTTP/2をTLS上でしか話さない相手でも、`APP_UPSTREAM`を`https://`にすれば動作します）。
-- **`grpc-only`** — `Content-Type`が`application/grpc`で始まるリクエストだけHTTP/2のまま中継し、他は`disabled`と同様にHTTP/1.1に変換します。`APP_UPSTREAM`が同じポートでgRPCサービスと通常のHTTPエンドポイントの両方を提供している場合に使用します。
+- **`disabled`**（既定）: `APP_UPSTREAM`への全リクエストをHTTP/1.1で送信します（クライアントがHTTP/2を使っていても同様）。通常のリクエスト/レスポンス型通信には問題ありませんが、gRPCは壊れます。ストリーミングやtrailerでのステータス通知（`grpc-status`）はHTTP/1.1では表現できないためです。
+- **`all`**: 全リクエストをHTTP/2のまま`APP_UPSTREAM`に中継します。`APP_UPSTREAM`がそのポートで実際にHTTP/2を話せる必要があります（平文h2c、またはTLS+ALPN。nginxのようにHTTP/2をTLS上でしか話さない相手でも、`APP_UPSTREAM`を`https://`にすれば動作します）。
+- **`grpc-only`**: `Content-Type`が`application/grpc`で始まるリクエストだけHTTP/2のまま中継し、他は`disabled`と同様にHTTP/1.1に変換します。`APP_UPSTREAM`が同じポートでgRPCサービスと通常のHTTPエンドポイントの両方を提供している場合に使用します。
 
 補足:
 
-- クライアント側のHTTP/2受け入れは、平文（h2c）と、`TLS_CERT_FILE`/`TLS_KEY_FILE`設定時のTLS+ALPNネゴシエーションの両方に対応しています——実際のブラウザ（TLS経由でのみHTTP/2を交渉）と同じ挙動です。
-- `APP_UPSTREAM`は`https://`でも指定できます。`HTTP20_PROXY_MODE = "disabled"`（TLS上でHTTP/1.1として中継）と`"all"`/`"grpc-only"`（TLS+ALPNでHTTP/2として中継。`h2`がネゴシエートされない場合は失敗）の両方で対応します。証明書検証は`SSL_CA_BUNDLE`が設定されていればそれを、なければOSの証明書ストアを使用します——mkcert等で発行したローカル開発用証明書も、そのCAをOSストアにインストール済みであれば追加設定なしで検証できます。
-- App Service（別ポート`HTTP20_ONLY_PORT`が必要）とは異なり、こちらのgRPCは`SITE_PORT`を他の全てと共有します——Azure Container Appsの単一ingress方式に近い設計です。
-- `APP_UPSTREAM`へのHTTP/2中継は単項リクエスト/レスポンスのみです（既存のHTTP/1.1版`_proxy_to`も双方向を全部バッファリングする実装なので、それと同じ制約です）——汎用的な双方向ストリーミング対応のgRPCクライアントではありません。
+- クライアント側のHTTP/2受け入れは、平文（h2c）と、`TLS_CERT_FILE`/`TLS_KEY_FILE`設定時のTLS+ALPNネゴシエーションの両方に対応しています。実際のブラウザ（TLS経由でのみHTTP/2を交渉）と同じ挙動です。
+- `APP_UPSTREAM`は`https://`でも指定できます。`HTTP20_PROXY_MODE = "disabled"`（TLS上でHTTP/1.1として中継）と`"all"`/`"grpc-only"`（TLS+ALPNでHTTP/2として中継。`h2`がネゴシエートされない場合は失敗）の両方で対応します。証明書検証は`SSL_CA_BUNDLE`が設定されていればそれを、なければOSの証明書ストアを使用します。mkcert等で発行したローカル開発用証明書も、そのCAをOSストアにインストール済みであれば追加設定なしで検証できます。
+- 既定では`SITE_PORT`を他の全てと共有します。Azure Container Appsの単一ingress方式に近い設計です。App Service方式の別ポートを模すには`APPSERVICE_HTTP20_ONLY_PORT`を設定してください（後述の「Azure App Serviceを模す場合の設定」参照）。
+- `APP_UPSTREAM`へのHTTP/2中継は単項リクエスト/レスポンスのみです（既存のHTTP/1.1版`_proxy_to`も双方向を全部バッファリングする実装なので、それと同じ制約です）。汎用的な双方向ストリーミング対応のgRPCクライアントではありません。
 
 ##### Azure Container Appsを模す場合の設定
 
@@ -212,9 +213,23 @@ Azure Container Appsのingressは`transport`という単一の設定（`auto`/`h
 | `http2`（HTTP/2のみ、全リクエスト） | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "all"` |
 | `auto`（コネクション単位で自動判定。gRPCと通常HTTPが混在するアプリでよく使われる） | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "grpc-only"` |
 
-`auto`は実際にはコネクション単位のプロトコルネゴシエーションであり、本エミュレーターの`grpc-only`（リクエストごとに`Content-Type`で判定）とは判定の仕組みが異なります。ただし「通常のHTTPリクエストはHTTP/1.1のまま、gRPC呼び出しだけHTTP/2になる」という観測結果は同じになるため、ローカルでの動作確認用にはこの対応で十分です。
-
 なお、gRPCが`SITE_PORT`を他の全てと共有する点は既にContainer Appsの単一ingress方式と同じで、App Serviceのように別ポートを用意する必要はありません。
+
+##### Azure App Serviceを模す場合の設定
+
+App ServiceはgRPC用に`SITE_PORT`とは別のポート（`HTTP20_ONLY_PORT`アプリ設定）を必要とします。本エミュレーターでこれを模すには`APPSERVICE_HTTP20_ONLY_PORT`を設定してください（`SITE_PORT`とは異なる値にする必要があります）。
+
+```toml
+SITE_PORT = 8080
+APPSERVICE_HTTP20_ONLY_PORT = 8082
+```
+
+設定すると:
+
+- このポートは`HTTP20_ENABLED`の値に関わらず常にHTTP/2でリッスンします（h2c、または`TLS_CERT_FILE`/`TLS_KEY_FILE`設定時はTLS+ALPNで`h2`のみをネゴシエート）。
+- このポート宛のリクエストは`HTTP20_PROXY_MODE`の値に関わらず常にHTTP/2で`APP_UPSTREAM`に中継されます。
+
+さらに、`APPSERVICE_HTTP20_ONLY_PORT`を設定した状態で`HTTP20_PROXY_MODE = "grpc-only"`にすると、`SITE_PORT`側の挙動が変わります。実機のApp Serviceでは443ポートも通常のHTTP/2トラフィックを処理しますが、gRPCは別ポート経由に限られるため、`SITE_PORT`側の`Content-Type`によるgRPC判定は行われなくなり、`SITE_PORT`宛のリクエストは（gRPC用のContent-Typeであっても）全部HTTP/1.1で中継されます（実質`disabled`と同じ挙動）。gRPC呼び出しは`APPSERVICE_HTTP20_ONLY_PORT`宛に送る必要があります。`HTTP20_PROXY_MODE`が`all`または`disabled`の場合は、`APPSERVICE_HTTP20_ONLY_PORT`の設定有無に関わらず`SITE_PORT`側の挙動は変わりません。
 
 ### 動作確認用アプリ設定
 

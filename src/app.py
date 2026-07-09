@@ -215,11 +215,30 @@ COOKIE_SECURE = _parse_bool_cfg("OAUTH2_PROXY_COOKIE_SECURE") or _TLS_ENABLED
 # HTTP/1.1 (fine for ordinary request/response traffic; breaks gRPC, which
 # cannot be represented over HTTP/1.1), "all" preserves HTTP/2 for every
 # request, "grpc-only" preserves it only for requests whose Content-Type
-# starts with application/grpc.
+# starts with application/grpc. HTTP20_PROXY_MODE only has any effect while
+# HTTP20_ENABLED is on — with it off, SITE_PORT never receives an HTTP/2
+# request to preserve in the first place, so every request is relayed as
+# HTTP/1.1 regardless of HTTP20_PROXY_MODE (APPSERVICE_HTTP20_ONLY_PORT below
+# is the one exception: that dedicated port is HTTP/2 end to end regardless
+# of HTTP20_ENABLED).
 HTTP20_ENABLED = _parse_bool_cfg("HTTP20_ENABLED")
 HTTP20_PROXY_MODE = (_cfg("HTTP20_PROXY_MODE", "disabled") or "disabled").strip().lower()
 if HTTP20_PROXY_MODE not in ("disabled", "all", "grpc-only"):
     HTTP20_PROXY_MODE = "disabled"
+
+# Dedicated HTTP/2-only port mirroring Azure App Service's HTTP20_ONLY_PORT
+# app setting (the separate port App Service requires for gRPC, distinct
+# from SITE_PORT — unlike Azure Container Apps, which multiplexes gRPC on a
+# single ingress port and has no equivalent of this). Prefixed with
+# APPSERVICE_ (rather than reusing Azure's literal name verbatim) since,
+# unlike HTTP20_ENABLED/HTTP20_PROXY_MODE, this whole port topology has no
+# Container Apps counterpart at all — the prefix signals at a glance that
+# Container Apps users can leave it unset.
+_APPSERVICE_HTTP20_ONLY_PORT_RAW = (_cfg("APPSERVICE_HTTP20_ONLY_PORT") or "").strip()
+try:
+    APPSERVICE_HTTP20_ONLY_PORT = int(_APPSERVICE_HTTP20_ONLY_PORT_RAW) if _APPSERVICE_HTTP20_ONLY_PORT_RAW else None
+except ValueError:
+    APPSERVICE_HTTP20_ONLY_PORT = None
 
 
 def _build_upstream_ssl_context(alpn_protocols: "list[str] | None" = None) -> ssl.SSLContext:
@@ -636,14 +655,35 @@ class _RoutingMixin:
 
     # --- Proxy helper ---
 
+    def _is_grpc_request(self) -> bool:
+        return self._header("Content-Type").lower().startswith("application/grpc")
+
+    # Set to True on instances handling a connection accepted on
+    # APPSERVICE_HTTP20_ONLY_PORT — see _wants_http2_upstream.
+    _force_http2_upstream = False
+
     def _wants_http2_upstream(self) -> bool:
         """Whether this request should be relayed to APP_UPSTREAM over HTTP/2
         rather than downgraded to HTTP/1.1, per HTTP20_PROXY_MODE (mirrors
         App Service's http20ProxyFlag: disabled/all/grpc-only)."""
+        if self._force_http2_upstream:
+            # Arrived on APPSERVICE_HTTP20_ONLY_PORT — that dedicated port is
+            # HTTP/2 end to end by definition, regardless of HTTP20_PROXY_MODE.
+            return True
+        if not HTTP20_ENABLED:
+            # SITE_PORT never accepts HTTP/2 from a client in the first
+            # place, so there is no inbound HTTP/2-ness for HTTP20_PROXY_MODE
+            # to preserve — relaying to APP_UPSTREAM over HTTP/2 here would
+            # upgrade a request that was never HTTP/2 to begin with.
+            return False
         if HTTP20_PROXY_MODE == "all":
             return True
         if HTTP20_PROXY_MODE == "grpc-only":
-            return self._header("Content-Type").lower().startswith("application/grpc")
+            if APPSERVICE_HTTP20_ONLY_PORT:
+                # gRPC is expected to arrive via the dedicated port instead,
+                # so SITE_PORT no longer special-cases it by Content-Type.
+                return False
+            return self._is_grpc_request()
         return False
 
     def _proxy_to(self, target_base: str, path_override: "str | None" = None,
@@ -953,6 +993,24 @@ class _RoutingMixin:
                 return
         self._send_empty(404)
 
+    def _deny_unauthenticated(self) -> None:
+        """Reject an unauthenticated request to a protected route. A gRPC
+        client can't follow (or make any sense of) a browser-style redirect
+        to /.auth/login — it would just hang until its own call deadline, as
+        real gRPC clients speak nothing but HTTP/2 request/response. Real
+        Azure App Service confirms this: its dedicated gRPC port returns a
+        plain 401 (+ WWW-Authenticate: Bearer) rather than redirecting. The
+        response still needs a gRPC-shaped Content-Type — without one, gRPC
+        client libraries (e.g. grpcurl) reject it as a malformed header
+        instead of mapping the bare 401 to an UNAUTHENTICATED status."""
+        if self._is_grpc_request():
+            self._send_empty(401, {
+                "WWW-Authenticate": "Bearer",
+                "Content-Type": "application/grpc",
+            })
+            return
+        self._redirect(f"/.auth/login?post_login_redirect_uri={quote(self.path, safe=_URL_SAFE)}")
+
     def _handle_protected(self) -> None:
         path = urlsplit(self.path).path
         for method, pattern in SKIP_AUTH_ROUTES:
@@ -962,7 +1020,7 @@ class _RoutingMixin:
 
         idp = self._current_idp()
         if not idp:
-            self._redirect(f"/.auth/login?post_login_redirect_uri={quote(self.path, safe=_URL_SAFE)}")
+            self._deny_unauthenticated()
             return
         auth_result = _check_auth(
             idp,
@@ -973,7 +1031,7 @@ class _RoutingMixin:
             uri=self.path,
         )
         if auth_result is None:
-            self._redirect(f"/.auth/login?post_login_redirect_uri={quote(self.path, safe=_URL_SAFE)}")
+            self._deny_unauthenticated()
             return
         extra: dict[str, str] = {
             "X-Real-IP":               self._client_ip(),
@@ -1186,8 +1244,9 @@ class _Http2Connection:
     control window would need proper windowed sending, not implemented here.
     """
 
-    def __init__(self, sock: "socket.socket") -> None:
+    def __init__(self, sock: "socket.socket", force_relay_http2: bool = False) -> None:
         self._sock = sock
+        self._force_relay_http2 = force_relay_http2
         self._conn = h2.connection.H2Connection(config=h2.config.H2Configuration(client_side=False))
         self._write_lock = threading.RLock()
         self._streams: "dict[int, dict]" = {}
@@ -1256,6 +1315,7 @@ class _Http2Connection:
             else:
                 headers.append((name, value))
         handler = _Http2StreamHandler(self, stream_id, pseudo, headers, body)
+        handler._force_http2_upstream = self._force_relay_http2
         try:
             handler._dispatch()
         except Exception:
@@ -1416,6 +1476,16 @@ class _MultiplexingServer(ThreadingHTTPServer):
         _Handler(request, client_address, self)
 
 
+class _Http2OnlyServer(ThreadingHTTPServer):
+    """APPSERVICE_HTTP20_ONLY_PORT listener — mirrors Azure App Service's
+    dedicated gRPC port: every connection here is HTTP/2 (h2c, or TLS
+    restricted to ALPN "h2"), unconditionally. No protocol sniffing needed
+    (unlike _MultiplexingServer) since this port never speaks HTTP/1.1."""
+
+    def finish_request(self, request, client_address) -> None:
+        _Http2Connection(request, force_relay_http2=True).run()
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1423,11 +1493,19 @@ class _MultiplexingServer(ThreadingHTTPServer):
 
 def main() -> None:
     port = int(SITE_PORT)
+    if APPSERVICE_HTTP20_ONLY_PORT == port:
+        print(
+            f"[app] ERROR: APPSERVICE_HTTP20_ONLY_PORT ({APPSERVICE_HTTP20_ONLY_PORT}) "
+            f"must differ from SITE_PORT ({port})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if sys.platform == "win32":
         # On Windows, SO_REUSEADDR lets a second process bind an in-use port,
         # silently splitting requests between two gateway instances (e.g. a
         # stale emulator left over from a crashed session) — fail fast instead.
         _MultiplexingServer.allow_reuse_address = False
+        _Http2OnlyServer.allow_reuse_address = False
     try:
         server = _MultiplexingServer(("0.0.0.0", port), _Handler)
     except OSError as exc:
@@ -1450,6 +1528,31 @@ def main() -> None:
         print(f"[app] Listening on https://0.0.0.0:{port}" + (" (HTTP/2 enabled)" if HTTP20_ENABLED else ""))
     else:
         print(f"[app] Listening on http://0.0.0.0:{port}" + (" (HTTP/2 enabled)" if HTTP20_ENABLED else ""))
+
+    if APPSERVICE_HTTP20_ONLY_PORT:
+        try:
+            dedicated_server = _Http2OnlyServer(("0.0.0.0", APPSERVICE_HTTP20_ONLY_PORT), _Handler)
+        except OSError as exc:
+            print(
+                f"[app] ERROR: cannot listen on port {APPSERVICE_HTTP20_ONLY_PORT} "
+                f"(APPSERVICE_HTTP20_ONLY_PORT): {exc}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if _TLS_ENABLED:
+            dedicated_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            try:
+                dedicated_ctx.load_cert_chain(TLS_CERT_FILE, TLS_KEY_FILE)
+            except Exception as exc:
+                print(f"[app] ERROR: Failed to load TLS certificate: {exc}", file=sys.stderr)
+                sys.exit(1)
+            dedicated_ctx.set_alpn_protocols(["h2"])
+            dedicated_server.socket = dedicated_ctx.wrap_socket(dedicated_server.socket, server_side=True)
+            print(f"[app] Listening on https://0.0.0.0:{APPSERVICE_HTTP20_ONLY_PORT} (HTTP/2 only, mirrors App Service's HTTP20_ONLY_PORT)")
+        else:
+            print(f"[app] Listening on http://0.0.0.0:{APPSERVICE_HTTP20_ONLY_PORT} (HTTP/2 only, mirrors App Service's HTTP20_ONLY_PORT)")
+        threading.Thread(target=dedicated_server.serve_forever, daemon=True).start()
+
     server.serve_forever()
 
 

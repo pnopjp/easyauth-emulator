@@ -83,6 +83,23 @@ To skip the PyInstaller build and repackage an existing `dist/` output:
 python scripts/package.py --skip-build
 ```
 
+### Python Tests
+
+Install dependencies into this project's own `.venv`, not your global/system Python — installing
+`requirements-test.txt` globally can upgrade shared packages (`protobuf`, `grpcio`) and break
+unrelated projects on your machine.
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt -r requirements-test.txt
+```
+
+Run the suite:
+
+```powershell
+.venv\Scripts\python -m pytest tests/python/ -v
+```
+
 ---
 
 ## Debug the Core Emulator (F5)

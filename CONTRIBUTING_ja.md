@@ -83,6 +83,23 @@ python scripts/package.py
 python scripts/package.py --skip-build
 ```
 
+### Python テスト
+
+依存関係はグローバル（システム）Pythonではなく、このプロジェクト専用の `.venv` にインストールしてください
+——`requirements-test.txt` をグローバルにインストールすると、共有パッケージ（`protobuf`・`grpcio`）が
+アップグレードされ、同じマシン上の無関係な他プロジェクトを壊す可能性があります。
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt -r requirements-test.txt
+```
+
+テストを実行する:
+
+```powershell
+.venv\Scripts\python -m pytest tests/python/ -v
+```
+
 ---
 
 ## エミュレーター本体のデバッグ（F5）

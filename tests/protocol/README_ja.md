@@ -82,6 +82,26 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
      `test_grpc_call_through_gateway`に動作例があります（別のゲートウェイインスタンスで
      `HTTP20_ENABLED=true`/`HTTP20_PROXY_MODE=grpc-only`を設定）。
 
+     `grpcurl`でゲートウェイ経由（`SITE_PORT`または`APPSERVICE_HTTP20_ONLY_PORT`。直接8083に
+     繋ぐ場合は対象外）を試す際に知っておくべき点が2つあります:
+
+     - **未認証呼び出しはハングせず即座に`401`が返ります。** 保護対象ルートへの未認証リクエストは
+       通常`/.auth/login`へのリダイレクトになりますが、gRPCクライアントはリダイレクトに追従できません
+       ——`Content-Type`が`application/grpc*`のリクエストには、実機のApp ServiceのgRPC専用ポートと
+       同様に素の`401`（+`WWW-Authenticate: Bearer`）を返すため、呼び出し側のデッドラインまで
+       ハングせず`Unauthenticated`として即座に失敗します。
+     - **必ず`-proto`（または`-import-path`）を指定してください** ——指定しない場合`grpcurl`は
+       サーバーリフレクションでメソッドを調べますが、リフレクションは双方向ストリーミングRPCです。
+       このゲートウェイのHTTP/2処理（受信側・`APP_UPSTREAM`への中継の両方）は単項リクエスト/
+       レスポンスのみに対応しています（設定リファレンスの「HTTP/2とgRPC」節の補足を参照）。
+       そのためリフレクション呼び出しはハングします——クライアントが送信側ストリームを
+       閉じない限りゲートウェイはリクエストのディスパッチ自体を行わないため、応答が返ってきません。
+       `-proto`でリフレクションを回避すればこの問題を避けられます:
+
+       ```bash
+       grpcurl -plaintext -proto tests/protocol/echo.proto -d '{"name":"world"}' localhost:<port> echo.Echo/SayHello
+       ```
+
 ## ファイル構成
 
 - `app.py` — HTTP + gRPCの検証用サーバー

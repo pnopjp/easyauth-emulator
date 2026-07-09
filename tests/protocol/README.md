@@ -117,6 +117,28 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
      `tests/python/test_protocol_gaps.py` for a full worked example (separate gateway
      instance, `HTTP20_ENABLED=true`/`HTTP20_PROXY_MODE=grpc-only`).
 
+     Two things to know when testing this with `grpcurl` specifically (through the
+     gateway — either `SITE_PORT` or `APPSERVICE_HTTP20_ONLY_PORT`, not directly against
+     port 8083):
+     - **Unauthenticated calls get a fast `401`, not a hang.** An unauthenticated request
+       to a protected route would normally redirect to `/.auth/login`, which a gRPC
+       client can't follow — instead, requests with a `Content-Type` of `application/grpc*`
+       get a plain `401` (+ `WWW-Authenticate: Bearer`, matching real App Service's
+       dedicated gRPC port) so the client fails fast with `Unauthenticated` instead of
+       hanging until its own call deadline.
+     - **Always pass `-proto` (or `-import-path`)** — without it, `grpcurl` uses server
+       reflection to look up the method, and reflection is a bidirectional-streaming RPC.
+       The gateway's HTTP/2 handling (both inbound and its relay to `APP_UPSTREAM`) is
+       unary request/response only (see the notes in the configuration reference's
+       "HTTP/2 and gRPC" section), so a reflection call just hangs — it never sees the
+       response, since the gateway never even dispatches the request until the client's
+       stream ends, and grpcurl's reflection client doesn't close its send side. Bypassing
+       reflection with `-proto` avoids this entirely:
+
+       ```bash
+       grpcurl -plaintext -proto tests/protocol/echo.proto -d '{"name":"world"}' localhost:<port> echo.Echo/SayHello
+       ```
+
 ## Files
 
 - `app.py` — the HTTP + gRPC verification servers
