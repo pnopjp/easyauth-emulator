@@ -1,6 +1,6 @@
 # プロトコル欠落 検証アプリ
 
-WebSocket、gRPC、SSE/ストリーミング、chunkedリクエストボディまわりのプロトコル挙動を確認するための手動検証用アプリ（WebSocketのみ`ToDo.md`記載の未対応項目として残っている）。単独動作で、`start.py`や`config.toml`には統合していません（`src/sample_app.py`とは異なる位置づけ）。
+WebSocket、gRPC、SSE/ストリーミング、chunkedリクエストボディまわりのプロトコル挙動を確認するための手動検証用アプリ。単独動作で、`start.py`や`config.toml`には統合していません（`src/sample_app.py`とは異なる位置づけ）。
 
 ## セットアップ
 
@@ -69,7 +69,7 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
 
 3. エミュレーターを起動し、ポート8082ではなく`http://localhost:<SITE_PORT>/`（ゲートウェイ）を開いて同じ確認を行います。現状の挙動は以下の通りです。
 
-   - **WebSocket** — ゲートウェイは`400 Bad Request`を返す。ゲートウェイ自身のヘッダーとupstreamの`101`応答のヘッダーが混在した壊れた応答になっており、Upgradeハンドシェイクを中継できていない（実機確認済み、`ToDo.md`記載の未対応項目）。
+   - **WebSocket** — HTTP/1.1では正しく動作します（このアプリのページも既定でHTTP/1.1でテストします）。ゲートウェイはUpgradeハンドシェイクを中継した後、クライアントと`APP_UPSTREAM`の間で生のバイト列を双方向にそのまま中継します。WebSocketのフレーム内容自体は一切解釈しないため、このアプリに限らずどのWebSocketアプリケーションでも動作します。HTTP/2上でのWebSocketブートストラップ（RFC 8441）は別の仕組みで未実装のままで、試みると`501 Not Implemented`になります。実際にはこれが発動することはありません。ゲートウェイのHTTP/2サーバーは`SETTINGS_ENABLE_CONNECT_PROTOCOL: 0`（`h2`ライブラリの既定値）を広告しており、RFC 8441はクライアント側がこれが有効であることを確認してから使う仕様だからです。
    - **SSE** — 正しく動作します。イベントは届いた分から順にストリーミングで中継され、upstreamの応答が完了するまでバッファリングされることはありません（`_proxy_to`のHTTP/1.1中継・`HTTP20_PROXY_MODE=all`時の`_http2_relay_request`によるHTTP/2中継の両方で対応済み）。
    - **chunkedボディ** — 正しく動作します。`Transfer-Encoding: chunked`のボディはデコードされてから中継され、`received_bytes`は送信した本文の長さと一致します。
    - **gRPC** — 同じ`grpcurl`/gRPCクライアントをゲートウェイの`SITE_PORT`に対して実行すると失敗する。根本原因（ゲートウェイがHTTP/1.1専用でgRPCが要求するHTTP/2接続をネゴシエートできない）は同じでも、クライアント実装によって症状が異なります。

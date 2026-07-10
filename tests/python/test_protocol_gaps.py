@@ -291,10 +291,6 @@ def appservice_grpc_only_gateway(tmp_path_factory, protocol_app):
     _stop(proc)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ToDo.md: WebSocket is not supported (HTTP/1.1 request/response proxying only)",
-)
 def test_websocket_upgrade_and_echo_through_gateway(gateway_port):
     port = gateway_port
     key = base64.b64encode(b"0123456789012345").decode()

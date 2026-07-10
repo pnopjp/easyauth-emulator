@@ -1,8 +1,8 @@
 # Protocol gap verification app
 
 Manual verification app for protocol behavior around WebSocket, gRPC, SSE/streaming, and
-chunked request bodies (only WebSocket remains an unaddressed gap tracked in `ToDo.md`).
-Standalone — not wired into `start.py` or `config.toml` (unlike `src/sample_app.py`).
+chunked request bodies. Standalone — not wired into `start.py` or `config.toml` (unlike
+`src/sample_app.py`).
 
 ## Setup
 
@@ -82,10 +82,15 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
 3. Start the emulator, then open `http://localhost:<SITE_PORT>/` (the gateway) instead
    of port 8082 directly, and repeat the same checks. Current behavior:
 
-   - **WebSocket** — the gateway responds `400 Bad Request` with a malformed response
-     (headers from both the gateway and the upstream's `101` response are concatenated)
-     instead of relaying the Upgrade handshake (confirmed, still an unaddressed gap
-     tracked in `ToDo.md`).
+   - **WebSocket** — works correctly, over HTTP/1.1 (this app's page is loaded and tested
+     that way by default). The gateway relays the Upgrade handshake, then shuttles raw
+     bytes bidirectionally between the client and `APP_UPSTREAM` until either side closes
+     — not aware of WebSocket framing at all, so it works with any WebSocket application,
+     not just this one. WebSocket bootstrapping over HTTP/2 (RFC 8441) is a separate,
+     unimplemented mechanism — a client attempting that gets `501 Not Implemented`. In
+     practice this never triggers: the gateway's HTTP/2 server advertises
+     `SETTINGS_ENABLE_CONNECT_PROTOCOL: 0` (the `h2` library's default), and RFC 8441
+     requires a client to see that enabled before attempting it.
    - **SSE** — works correctly. Events are relayed as they arrive rather than being
      buffered until the upstream response completes (both `_proxy_to`'s HTTP/1.1 relay
      and `_http2_relay_request`'s HTTP/2 relay under `HTTP20_PROXY_MODE=all` support this).

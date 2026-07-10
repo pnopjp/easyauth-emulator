@@ -185,8 +185,8 @@ OAUTH2_PROXY_REQUEST_LOGGING = true    # リクエストごとの HTTP ログ
 - `/.auth/logout` は本エミュレーターおよび oauth2-proxy のセッションを必ず先に終了します。IdP 側ブラウザー SSO の終了はベストエフォートです。
 - ログインフローにはエミュレーター固有仕様（`/.auth/login/select`、`DEFAULT_IDP`、`IDP_LIST` 1件時の既定化）が含まれます。
 - セッション制御は oauth2-proxy の cookie と本エミュレーターのルーティング規則に基づくため、マネージド Easy Auth の内部挙動とは差分が出る場合があります。
-- WebSocket には対応していません（HTTP/1.1 のリクエスト/レスポンス型プロキシのみ）。
 - gRPCは対応していますが既定オフ・オプトイン方式です — [HTTP/2とgRPC](docs/configuration-reference_ja.md#http2とgrpc)を参照してください。Azure App Serviceの`http20ProxyFlag`が既定で無効なのと同じ位置づけです。
+- WebSocketはHTTP/1.1でのみ対応しています。HTTP/2上でのWebSocketブートストラップ（RFC 8441、`:protocol`疑似ヘッダーを使う拡張`CONNECT`メソッド）は未実装で、試みると`501 Not Implemented`が返ります。実際にはこれが発動することはありません。このゲートウェイのHTTP/2サーバーは`SETTINGS_ENABLE_CONNECT_PROTOCOL: 0`（`h2`ライブラリの既定値）を広告しており、RFC 8441はクライアント側がこの設定が有効であることを確認してから初めて使用する仕様なので、RFC 8441に対応したクライアント（対応ブラウザ等）であっても、このゲートウェイに対しては通常のHTTP/1.1 WebSocket接続にフォールバックするからです。
 
 ## 非対応プロバイダー
 

@@ -1094,11 +1094,35 @@ class _RoutingMixin:
             return
         self._redirect(f"/.auth/login?post_login_redirect_uri={quote(self.path, safe=_URL_SAFE)}")
 
+    def _is_websocket_upgrade_request(self) -> bool:
+        return (
+            "websocket" in self._header("Upgrade").lower()
+            and "upgrade" in self._header("Connection").lower()
+        )
+
+    def _proxy_websocket(self, target_base: str, extra_headers: "dict[str, str] | None" = None) -> None:
+        """Relay a WebSocket Upgrade handshake, then the raw bidirectional
+        connection itself, until either side closes. RFC 6455's Upgrade
+        mechanism is an HTTP/1.1 concept, so only _Handler implements this —
+        WebSocket bootstrapping over HTTP/2 (RFC 8441, extended CONNECT) is a
+        distinct, unimplemented feature; this default just rejects it
+        cleanly. In practice this is never hit: h2's default SETTINGS
+        (h2.config.H2Configuration, used unmodified by _Http2Connection)
+        advertise ENABLE_CONNECT_PROTOCOL=0, and RFC 8441 requires a client
+        to see that enabled before attempting it — so any compliant client
+        just falls back to an ordinary HTTP/1.1 WebSocket connection instead,
+        which _Handler already handles."""
+        self._send_empty(501)
+
     def _handle_protected(self) -> None:
         path = urlsplit(self.path).path
+        is_ws = self._is_websocket_upgrade_request()
         for method, pattern in SKIP_AUTH_ROUTES:
             if (method == "*" or method == self.command) and pattern.search(path):
-                self._proxy_to(APP_UPSTREAM, strip_headers=_AUTH_HEADERS_TO_STRIP)
+                if is_ws:
+                    self._proxy_websocket(APP_UPSTREAM)
+                else:
+                    self._proxy_to(APP_UPSTREAM, strip_headers=_AUTH_HEADERS_TO_STRIP)
                 return
 
         idp = self._current_idp()
@@ -1124,7 +1148,10 @@ class _RoutingMixin:
             "X-Easyauth-User-Id-Claim":   _idp_user_id_claim(idp),
         }
         extra.update(auth_result)
-        self._proxy_to(APP_UPSTREAM, extra_headers=extra, strip_headers=_AUTH_HEADERS_TO_STRIP)
+        if is_ws:
+            self._proxy_websocket(APP_UPSTREAM, extra_headers=extra)
+        else:
+            self._proxy_to(APP_UPSTREAM, extra_headers=extra, strip_headers=_AUTH_HEADERS_TO_STRIP)
 
 
 class _Handler(BaseHTTPRequestHandler, _RoutingMixin):
@@ -1272,6 +1299,104 @@ class _Handler(BaseHTTPRequestHandler, _RoutingMixin):
             self.wfile.flush()
         except (ConnectionError, OSError):
             pass
+
+    def _proxy_websocket(self, target_base: str, extra_headers: "dict[str, str] | None" = None) -> None:
+        parsed = urlsplit(target_base)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        target_path = (parsed.path or "").rstrip("/")
+        req_path = target_path + self.path if target_path else self.path
+
+        # Unlike _proxy_to, Connection/Upgrade are NOT stripped as hop-by-hop
+        # here — they're exactly what's needed for the upstream to also
+        # perform the Upgrade. Only the injected Easy Auth headers (a fresh
+        # set is about to be added back in via extra_headers) are stripped.
+        headers: dict[str, str] = {}
+        for name, value in self._all_headers():
+            if name.lower() in _AUTH_HEADERS_TO_STRIP:
+                continue
+            headers[name] = value
+        if extra_headers:
+            headers.update(extra_headers)
+
+        try:
+            upstream_sock = socket.create_connection((host, port), timeout=10)
+        except OSError as exc:
+            print(f"[app] upstream WebSocket connect to {host}:{port} failed: {exc!r}", file=sys.stderr)
+            self._send_empty(502)
+            return
+
+        try:
+            request_line = f"{self.command} {req_path} HTTP/1.1\r\n"
+            header_lines = "".join(f"{name}: {value}\r\n" for name, value in headers.items())
+            upstream_sock.sendall((request_line + header_lines + "\r\n").encode("latin-1"))
+
+            resp_buf = b""
+            upstream_sock.settimeout(10)
+            while b"\r\n\r\n" not in resp_buf:
+                chunk = upstream_sock.recv(4096)
+                if not chunk:
+                    break
+                resp_buf += chunk
+
+            header_part, sep, leftover = resp_buf.partition(b"\r\n\r\n")
+            if not sep:
+                print(f"[app] upstream WebSocket handshake with {host}:{port} closed before completing", file=sys.stderr)
+                self._send_empty(502)
+                return
+
+            # Relay the handshake response back to the real client verbatim,
+            # whatever it was — a successful 101, or the upstream declining
+            # to upgrade (an ordinary response, which just ends here).
+            self.wfile.write(header_part + b"\r\n\r\n")
+            self.wfile.flush()
+
+            status_parts = header_part.split(b"\r\n", 1)[0].split(b" ", 2)
+            if len(status_parts) < 2 or status_parts[1] != b"101":
+                return
+
+            # Not a fresh HTTP/1.1 request/response from here on — the
+            # connection is now a raw, arbitrarily long-lived, bidirectional
+            # pipe of WebSocket frames neither side treats as HTTP anymore.
+            # The 120s idle timeout _Handler normally applies (to reclaim
+            # threads pinned by an abandoned keep-alive connection) doesn't
+            # apply to an intentionally long-lived WebSocket session.
+            self.connection.settimeout(None)
+            upstream_sock.settimeout(None)
+            if leftover:
+                self.connection.sendall(leftover)
+            self._relay_bidirectional(self.connection, upstream_sock)
+        except (ConnectionError, OSError) as exc:
+            print(f"[app] WebSocket relay to {host}:{port} failed: {exc!r}", file=sys.stderr)
+        finally:
+            try:
+                upstream_sock.close()
+            except OSError:
+                pass
+
+    def _relay_bidirectional(self, sock_a: "socket.socket", sock_b: "socket.socket") -> None:
+        """Shuttle raw bytes between two sockets in both directions until
+        either side closes — used for WebSocket after a successful Upgrade,
+        where neither side is speaking HTTP anymore."""
+        def _pump(src: "socket.socket", dst: "socket.socket") -> None:
+            try:
+                while True:
+                    data = src.recv(65536)
+                    if not data:
+                        break
+                    dst.sendall(data)
+            except OSError:
+                pass
+            finally:
+                try:
+                    dst.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+
+        t = threading.Thread(target=_pump, args=(sock_a, sock_b), daemon=True)
+        t.start()
+        _pump(sock_b, sock_a)
+        t.join(timeout=5)
 
 
 # ---------------------------------------------------------------------------
