@@ -10,3 +10,4 @@ __*/
 venv/
 .venv/
 ToDo.md
+tests/protocol/azure-websocket-poc/vendor/
