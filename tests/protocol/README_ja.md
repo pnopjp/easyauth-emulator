@@ -1,6 +1,12 @@
 # プロトコル欠落 検証アプリ
 
-WebSocket、gRPC、SSE/ストリーミング、chunkedリクエストボディまわりのプロトコル挙動を確認するための手動検証用アプリ。単独動作で、`start.py`や`config.toml`には統合していません（`src/sample_app.py`とは異なる位置づけ）。
+WebSocket、gRPC、SSE/ストリーミング、chunkedリクエストボディまわりのプロトコル挙動を確認するための手動検証用アプリ。`src/sample_app.py`が持つprincipal/claims/storageの確認ページも同梱しています(どちらも「デモ用APP_UPSTREAM」という同じ役割で、こちらはgRPCも含む「フル機能版」、`src/sample_app.py`は追加の`grpcio`依存を持たずエミュレーター本体と一緒に配布される「軽量版」という位置づけ)。共有ロジックは`src/_sample_app_shared.py`にあります。`start.py`には統合していません(`src/sample_app.py`は`start.py`が自動起動しますが、こちらは単独動作です)。
+
+`config.toml`はエミュレーター本体と同じ仕組みで読み込みますが、`--config PATH`で上書きできます(`tests/python/test_protocol_gaps.py`が、開発者の実際のシークレットを含む`config.toml`を自動テスト中に読まないようにするため使用):
+
+```bash
+python -m tests.protocol.app --config path/to/other-config.toml
+```
 
 ## セットアップ
 
@@ -25,12 +31,12 @@ python -m tests.protocol.app
 
 2つのサーバーが起動します（Ctrl+Cで両方停止します）。
 
-- HTTP検証ページ: `http://localhost:8082/`（`PROTOCOL_APP_PORT`）
+- HTTP検証ページ: `http://localhost:8082/`（`SAMPLE_APP_PORT`。`src/sample_app.py`と同じ設定）
 - gRPCサービス（reflection有効）: `localhost:8083`（`PROTOCOL_APP_GRPC_PORT`）
 
 ## 直接アクセスでの確認（正常動作するはず）
 
-`http://localhost:8082/`を開き、WebSocketとSSEのセクションを試してください。どちらも正常に動作するはずです。
+`http://localhost:8082/`を開き、WebSocketとSSEのセクションを試してください。どちらも正常に動作するはずです。`http://localhost:8082/session`には`src/sample_app.py`と同じprincipal/claims/Storage確認ページがあります(別アプリを起動しなくてもEasy Authヘッダー注入を確認できます)。
 
 chunkedボディのセクションにはブラウザ用ボタンがありません。Chrome/Edgeは`fetch`のストリーミングリクエストボディにHTTP/2以上を要求し、HTTP/1.1サーバーに対しては`net::ERR_H2_OR_QUIC_REQUIRED`で拒否します。このアプリもゲートウェイもHTTP/1.1専用なので、ページに表示されているcurlコマンドを使ってください。
 
@@ -69,7 +75,7 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
 
 3. エミュレーターを起動し、ポート8082ではなく`http://localhost:<SITE_PORT>/`（ゲートウェイ）を開いて同じ確認を行います。現状の挙動は以下の通りです。
 
-   - **WebSocket** — HTTP/1.1では正しく動作します（このアプリのページも既定でHTTP/1.1でテストします）。ゲートウェイはUpgradeハンドシェイクを中継した後、クライアントと`APP_UPSTREAM`の間で生のバイト列を双方向にそのまま中継します。WebSocketのフレーム内容自体は一切解釈しないため、このアプリに限らずどのWebSocketアプリケーションでも動作します。HTTP/2上でのWebSocketブートストラップ（RFC 8441）は別の仕組みで未実装のままで、試みると`501 Not Implemented`になります。実際にはこれが発動することはありません。ゲートウェイのHTTP/2サーバーは`SETTINGS_ENABLE_CONNECT_PROTOCOL: 0`（`h2`ライブラリの既定値）を広告しており、RFC 8441はクライアント側がこれが有効であることを確認してから使う仕様だからです。
+   - **WebSocket** — クライアントがHTTP/1.1（このアプリのページも既定でこちらでテストします）とHTTP/2（RFC 8441の拡張`CONNECT`）のどちらで来ても正しく動作します。どちらの場合も、ゲートウェイは`APP_UPSTREAM`(このアプリ自身。HTTP/1.1しか話しません)へは従来のUpgradeハンドシェイクとして中継し、その後クライアントとupstreamの間で生のバイト列を双方向にそのまま中継します。WebSocketのフレーム内容自体は一切解釈しないため、このアプリに限らずどのWebSocketアプリケーションでも動作します。本物のAzure App Serviceも`HTTP20_PROXY_MODE`の値に関わらず全く同じ変換をします(詳細は`tests/protocol/azure-websocket-poc`参照)。
    - **SSE** — 正しく動作します。イベントは届いた分から順にストリーミングで中継され、upstreamの応答が完了するまでバッファリングされることはありません（`_proxy_to`のHTTP/1.1中継・`HTTP20_PROXY_MODE=all`時の`_http2_relay_request`によるHTTP/2中継の両方で対応済み）。
    - **chunkedボディ** — 正しく動作します。`Transfer-Encoding: chunked`のボディはデコードされてから中継され、`received_bytes`は送信した本文の長さと一致します。
    - **gRPC** — 同じ`grpcurl`/gRPCクライアントをゲートウェイの`SITE_PORT`に対して実行すると失敗する。根本原因（ゲートウェイがHTTP/1.1専用でgRPCが要求するHTTP/2接続をネゴシエートできない）は同じでも、クライアント実装によって症状が異なります。
@@ -104,7 +110,7 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
 
 ## ファイル構成
 
-- `app.py` — HTTP + gRPCの検証用サーバー
+- `app.py` — HTTP + gRPCの検証用サーバー(principal/claims/storageページとWebSocket/SSE/chunkedボディのハンドラーは`src/_sample_app_shared.py`から読み込み、`src/sample_app.py`と共有)
 - `send_chunked.py` — `Transfer-Encoding: chunked`のPOSTを複数の実チャンクに分けて送信する(使い方は上記「直接アクセスでの確認」参照)
 - `send_http2.py` — 平文HTTP/2（h2c）で1リクエストを送信しレスポンスを表示する。`HTTP20_ENABLED`を
   通常の（gRPCでない）ルートに対してテストするためのもの。Windows版curlは通常HTTP/2に非対応

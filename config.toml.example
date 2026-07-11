@@ -21,8 +21,9 @@ APP_UPSTREAM = "http://localhost:8081"
 # When true, enables GET /.debug/headers for inspecting forwarded headers.
 DEBUG_HEADERS_ENDPOINT_ENABLED = false
 
-# Print all resolved configuration values on startup (secrets masked).
-# Can also be enabled with the --verbose / -v CLI flag.
+# Print all resolved configuration values on startup (secrets masked), and
+# enable extra protocol-level diagnostic logging (e.g. exactly what headers a
+# request arrived with) to stderr. Can also be enabled with --verbose / -v.
 # VERBOSE = false
 
 # Routes that bypass authentication entirely (forwarded to upstream without auth check).
@@ -66,13 +67,19 @@ DEBUG_HEADERS_ENDPOINT_ENABLED = false
 #   grpc-only  — relay only requests with a Content-Type of application/grpc*
 # HTTP20_PROXY_MODE = "disabled"
 
-# Dedicated HTTP/2-only port for gRPC, mirroring Azure App Service's
-# HTTP20_ONLY_PORT app setting (Container Apps has no equivalent — it
-# multiplexes gRPC on SITE_PORT instead, so leave this unset for that case).
-# When set, this port always speaks HTTP/2 and always relays to APP_UPSTREAM
-# as HTTP/2, regardless of HTTP20_ENABLED/HTTP20_PROXY_MODE. Must differ from
-# SITE_PORT.
+# Mirrors Azure App Service's HTTP20_ONLY_PORT app setting (Container Apps
+# has no equivalent — it multiplexes gRPC on SITE_PORT instead, so leave
+# this unset for that case). Whenever a request is relayed to APP_UPSTREAM
+# over HTTP/2 (per HTTP20_PROXY_MODE above), it's sent to this port on
+# APP_UPSTREAM's host instead of APP_UPSTREAM's own port.
 # APPSERVICE_HTTP20_ONLY_PORT = 8082
+
+# Whether WebSocket (HTTP/1.1 Upgrade and HTTP/2 RFC 8441 extended CONNECT) is
+# relayed at all, mirroring Azure App Service's "Web sockets" on/off switch. On
+# Linux App Service this is always effectively on; only Windows App Service
+# can actually turn it off. Set to false to match a Windows App Service
+# instance with "Web sockets" turned off.
+# WEB_SOCKETS_ENABLED = true
 
 # ---- oauth2-proxy settings --------------------------------------------------
 

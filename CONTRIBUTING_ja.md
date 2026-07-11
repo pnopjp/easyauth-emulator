@@ -120,7 +120,7 @@ python -m venv .venv
 
 ## 動作確認用アプリ（sample_app）
 
-`src/sample_app.py` は、認証済みユーザーの claim を表示し、Azure Blob Storage への委任アクセスをテストするオプションの動作確認用アプリです。エミュレーターが Easy Auth 互換ヘッダーを正しく注入しているか確認するために使用します。
+`src/sample_app.py` は、認証済みユーザーの claim を表示し、Azure Blob Storage への委任アクセスをテストするオプションの動作確認用アプリです。エミュレーターが Easy Auth 互換ヘッダーを正しく注入しているか確認するために使用します。ゲートウェイ経由のWebSocket/SSE/chunkedリクエストボディの動作確認用に`/protocol`ページも持っています(gRPCも含めた同種のデモは`tests/protocol/README_ja.md`を参照。こちらは開発用のみでエミュレーター本体の配布物には含まれません)。
 
 ### 有効化
 

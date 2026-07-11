@@ -94,7 +94,7 @@
             "type": "boolean",
             "default": false,
             "order": 6,
-            "markdownDescription": "Print all resolved configuration values (secrets masked) on startup. Passes `--verbose` to the emulator process."
+            "markdownDescription": "Print all resolved configuration values (secrets masked) on startup, and enable extra protocol-level diagnostic logging to stderr. Passes `--verbose` to the emulator process."
           },
           "easyauth.privateBrowser.command": {
             "type": "string",
@@ -165,34 +165,41 @@
             "default": null,
             "scope": "resource",
             "order": 7,
-            "markdownDescription": "`APPSERVICE_HTTP20_ONLY_PORT`: Dedicated HTTP/2-only port for gRPC, mirroring Azure App Service's `HTTP20_ONLY_PORT` app setting (leave unset for Azure Container Apps, which has no equivalent). Must differ from `site.port`. See the [\"HTTP/2 and gRPC\"](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#http2-and-grpc) section of the configuration reference."
+            "markdownDescription": "`APPSERVICE_HTTP20_ONLY_PORT`: Mirrors Azure App Service's `HTTP20_ONLY_PORT` app setting (leave unset for Azure Container Apps, which has no equivalent). When a request is relayed over HTTP/2, it's sent to this port on `APP_UPSTREAM`'s host instead of `APP_UPSTREAM`'s own port. See the [\"HTTP/2 and gRPC\"](https://github.com/pnopjp/easyauth-emulator/blob/main/docs/configuration-reference.md#http2-and-grpc) section of the configuration reference."
+          },
+          "easyauth.webSocketsEnabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "order": 8,
+            "markdownDescription": "`WEB_SOCKETS_ENABLED`: Whether WebSocket (HTTP/1.1 Upgrade and HTTP/2 RFC 8441 extended CONNECT) is relayed at all, mirroring Azure App Service's \"Web sockets\" on/off switch. On Linux App Service this is always effectively on; only Windows App Service can actually turn it off. Set to false to match a Windows App Service instance with \"Web sockets\" turned off."
           },
           "easyauth.defaultIdp": {
             "type": "string",
             "default": "",
             "scope": "resource",
-            "order": 8,
+            "order": 9,
             "markdownDescription": "`DEFAULT_IDP`: Default IDP when `/.auth/login` is accessed. Must match a name in the configured IDPs. Leave empty to auto-select when only one IDP is configured, or to show the selection screen when multiple IDPs are configured."
           },
           "easyauth.skipAuthRoutes": {
             "type": "string",
             "default": "",
             "scope": "resource",
-            "order": 9,
+            "order": 10,
             "markdownDescription": "`SKIP_AUTH_ROUTES`: Routes that bypass authentication and are forwarded directly to upstream. Comma-separated list of `[METHOD=]REGEX` patterns.\n\n**Example:** `GET=^/health$,^/public/`"
           },
           "easyauth.debugHeadersEndpointEnabled": {
             "type": "boolean",
             "default": false,
             "scope": "resource",
-            "order": 10,
+            "order": 11,
             "markdownDescription": "`DEBUG_HEADERS_ENDPOINT_ENABLED`: Enable `GET /.debug/headers` endpoint to inspect computed auth headers."
           },
           "easyauth.idpSelectIcons": {
             "type": "string",
             "default": "simple",
             "scope": "resource",
-            "order": 11,
+            "order": 12,
             "enum": [
               "simple",
               "generic",

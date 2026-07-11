@@ -186,13 +186,6 @@ A VS Code extension in `vscode-extension/` automatically starts and stops the em
 - Login flow includes emulator-specific behavior (`/.auth/login/select`, `DEFAULT_IDP`, single-item `IDP_LIST` default handling).
 - Session handling is based on oauth2-proxy cookies and emulator routing rules, so behavior can differ from managed Easy Auth internals.
 - gRPC is supported, but opt-in — see [HTTP/2 and gRPC](docs/configuration-reference.md#http2-and-grpc). It is off by default, mirroring Azure App Service's `http20ProxyFlag` defaulting to disabled.
-- WebSocket is supported over HTTP/1.1 only. WebSocket bootstrapping over HTTP/2 (RFC 8441,
-  the `CONNECT` method with a `:protocol` pseudo-header) is not implemented — a client that
-  attempts it gets `501 Not Implemented`. In practice this is never triggered: this gateway's
-  HTTP/2 server advertises `SETTINGS_ENABLE_CONNECT_PROTOCOL: 0` (the `h2` library's default),
-  and RFC 8441 requires a client to see that setting enabled before attempting it — so a
-  compliant client (e.g. a browser that does support RFC 8441) falls back to an ordinary
-  HTTP/1.1 WebSocket connection instead, the same as one that doesn't.
 
 ## Unsupported Providers
 

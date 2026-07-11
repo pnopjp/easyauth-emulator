@@ -8,7 +8,7 @@ This document describes runtime configuration, compatibility boundaries, and tro
 | --- | --- | --- |
 | `--app-upstream URL` | — | Override `APP_UPSTREAM`. Takes priority over `config.toml` and environment variables. Useful for changing the target port without editing the config file. |
 | `--config PATH` | `config.toml` in current directory | Path to the configuration file. |
-| `--verbose`, `-v` | `false` | Print all resolved configuration values on startup with secrets masked. Equivalent to `VERBOSE = true` in `config.toml`. |
+| `--verbose`, `-v` | `false` | Print all resolved configuration values on startup with secrets masked, and enable extra protocol-level diagnostic logging (e.g. exactly what headers a request arrived with) to stderr. Equivalent to `VERBOSE = true` in `config.toml`. |
 
 ## Configuration
 
@@ -28,7 +28,7 @@ Security note:
 | `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | Enables the `GET /.debug/headers` diagnostic endpoint. When enabled, that URL shows the headers the emulator receives and computes. Disabled by default — returns `404`. |
 | `SKIP_AUTH_ROUTES` | | — | Routes that bypass authentication and are forwarded directly to the upstream. Format: comma-separated list of `[METHOD=]REGEX` patterns matched against the request path. Example: `GET=^/health$,^/public/`. Injected auth headers are stripped before forwarding. |
 | `IDP_SELECT_ICONS` | | `simple` | Icon style for the `/.auth/login/select` page. `simple` — Simple Icons CDN logo. `generic` — generic ID card icon (fully offline). `text` — no icon, text labels only. |
-| `VERBOSE` | | `false` | Print all resolved configuration values on startup with secrets masked. Equivalent to passing `--verbose` / `-v` on the command line. |
+| `VERBOSE` | | `false` | Print all resolved configuration values on startup with secrets masked, and enable extra protocol-level diagnostic logging (e.g. exactly what headers a request arrived with) to stderr. Equivalent to passing `--verbose` / `-v` on the command line. |
 
 ※ If `SAMPLE_APP_PORT` is changed, the default becomes `http://localhost:<SAMPLE_APP_PORT>` when `APP_UPSTREAM` is not set.
 
@@ -132,8 +132,9 @@ Version management behavior:
 | `TLS_KEY_FILE` | | — | Path to the TLS private key (PEM format). When set together with `TLS_CERT_FILE`, the emulator accepts inbound requests over HTTPS. |
 | `SSL_CA_BUNDLE` | | — | Path to a custom CA certificate bundle (PEM format). Used for outbound HTTPS connections the emulator makes: to GitHub (oauth2-proxy downloads), and to `APP_UPSTREAM` when it's `https://`. Normally not needed — the OS certificate store (Windows, macOS, Linux) is used automatically via [truststore](https://github.com/sethmlarson/truststore) (a locally-issued dev cert, e.g. mkcert, verifies once its CA is installed into that store). Set this only when your network has SSL inspection (MITM proxy) and the proxy CA cannot be added to the OS trust store, for example on Linux without root access. |
 | `HTTP20_ENABLED` | | `false` | Accept HTTP/2 on `SITE_PORT`, alongside HTTP/1.1 (additive, not exclusive — mirrors Azure App Service's "HTTP version: 2.0"). See [HTTP/2 and gRPC](#http2-and-grpc) below. |
-| `HTTP20_PROXY_MODE` | | `disabled` | How much of an HTTP/2 request is preserved end to end to `APP_UPSTREAM` (mirrors Azure App Service's `http20ProxyFlag`): `disabled` downgrades everything to HTTP/1.1 (breaks gRPC); `all` relays everything as HTTP/2 (`APP_UPSTREAM` must speak HTTP/2); `grpc-only` relays only requests with a `Content-Type` of `application/grpc*`. Only takes effect while `HTTP20_ENABLED` is on — with it off, `SITE_PORT` never receives an HTTP/2 request to preserve, so everything is relayed as HTTP/1.1 regardless of this setting (`APPSERVICE_HTTP20_ONLY_PORT` below is the one exception). |
-| `APPSERVICE_HTTP20_ONLY_PORT` | | — | Dedicated HTTP/2-only port for gRPC (mirrors Azure App Service's `HTTP20_ONLY_PORT` app setting; Azure Container Apps has no equivalent concept, so leave this unset for that case). When set, this port always listens as HTTP/2 and always relays to `APP_UPSTREAM` as HTTP/2, regardless of `HTTP20_ENABLED`/`HTTP20_PROXY_MODE`. Must differ from `SITE_PORT`. See [HTTP/2 and gRPC](#http2-and-grpc) below. |
+| `HTTP20_PROXY_MODE` | | `disabled` | How much of an HTTP/2 request is preserved end to end to `APP_UPSTREAM` (mirrors Azure App Service's `http20ProxyFlag`): `disabled` downgrades everything to HTTP/1.1 (breaks gRPC); `all` relays everything as HTTP/2 (`APP_UPSTREAM` must speak HTTP/2); `grpc-only` relays only requests with a `Content-Type` of `application/grpc*`. Only takes effect while `HTTP20_ENABLED` is on — with it off, `SITE_PORT` never receives an HTTP/2 request to preserve, so everything is relayed as HTTP/1.1 regardless of this setting. |
+| `APPSERVICE_HTTP20_ONLY_PORT` | | — | Mirrors Azure App Service's `HTTP20_ONLY_PORT` app setting (Azure Container Apps has no equivalent concept, so leave this unset for that case). When a request is relayed to `APP_UPSTREAM` over HTTP/2 (per `HTTP20_PROXY_MODE` above), it's sent to this port on `APP_UPSTREAM`'s host instead of `APP_UPSTREAM`'s own port. See [HTTP/2 and gRPC](#http2-and-grpc) below. |
+| `WEB_SOCKETS_ENABLED` | | `true` | Whether WebSocket (both the classic HTTP/1.1 `Upgrade` and the RFC 8441 HTTP/2 extended `CONNECT`) is relayed at all, mirroring Azure App Service's "Web sockets" on/off switch. On Linux App Service, WebSocket is always effectively on regardless of that switch; only Windows App Service can actually turn it off. Set this to `false` to match a Windows App Service instance with "Web sockets" turned off. When off, a WebSocket bootstrap attempt is not treated specially — it falls through to an ordinary proxied request/response instead. |
 
 #### Enabling HTTPS (TLS)
 
@@ -216,9 +217,9 @@ Notes:
   failing if the upstream doesn't negotiate `h2`). Certificate verification uses
   `SSL_CA_BUNDLE` if set, otherwise the OS trust store — so a locally-issued dev cert (e.g.
   mkcert) verifies once its CA is installed into the OS store, with no extra configuration.
-- By default, gRPC shares `SITE_PORT` with everything else, matching Azure Container Apps'
-  single-ingress model. To emulate App Service's separate port instead, set
-  `APPSERVICE_HTTP20_ONLY_PORT` (see "Configuring for Azure App Service" below).
+- To emulate App Service's `HTTP20_ONLY_PORT` (a second port the upstream app itself
+  listens on for HTTP/2-relayed traffic), set `APPSERVICE_HTTP20_ONLY_PORT` (see
+  "Configuring for Azure App Service" below).
 - Both relay paths to `APP_UPSTREAM` (HTTP/1.1 and HTTP/2) forward the response as it
   arrives rather than buffering it in memory first — this is what lets a streaming
   endpoint (SSE, etc.) work under any `HTTP20_PROXY_MODE`. The request body, though, is
@@ -243,28 +244,17 @@ Apps' single-ingress model. No separate port to configure, unlike App Service.
 
 ##### Configuring for Azure App Service
 
-App Service requires a separate port for gRPC (the `HTTP20_ONLY_PORT` app setting),
-distinct from `SITE_PORT`. To emulate this, set `APPSERVICE_HTTP20_ONLY_PORT` (which must
-differ from `SITE_PORT`):
+App Service requires the upstream app to have a second listener for gRPC, on a port given by
+the `HTTP20_ONLY_PORT` app setting — separate from the app's regular HTTP/1.1 port. To emulate
+this, set `APPSERVICE_HTTP20_ONLY_PORT` to the port your upstream app's own gRPC/HTTP-2-only
+listener is bound to (on the same host as `APP_UPSTREAM`):
 
 ```toml
-SITE_PORT = 8080
-APPSERVICE_HTTP20_ONLY_PORT = 8082
+HTTP20_ENABLED = true
+HTTP20_PROXY_MODE = "grpc-only"
+APP_UPSTREAM = "http://localhost:8081"        # the app's regular HTTP/1.1 port
+APPSERVICE_HTTP20_ONLY_PORT = 8082            # the app's separate gRPC listener, same host
 ```
-
-Once set:
-
-- This port always listens as HTTP/2, regardless of `HTTP20_ENABLED` (h2c, or TLS with ALPN
-  restricted to `h2` when `TLS_CERT_FILE`/`TLS_KEY_FILE` are set).
-- Requests to this port are always relayed to `APP_UPSTREAM` as HTTP/2, regardless of
-  `HTTP20_PROXY_MODE`.
-
-With `APPSERVICE_HTTP20_ONLY_PORT` set and `HTTP20_PROXY_MODE = "grpc-only"`, `SITE_PORT`'s
-own behavior changes too: real App Service's port 443 still handles ordinary HTTP/2 traffic,
-but gRPC is only ever reachable through the dedicated port, so `SITE_PORT` stops
-special-casing `Content-Type` for gRPC, and relays everything to `APP_UPSTREAM` as HTTP/1.1
-(the same as `disabled`). Send gRPC calls to `APPSERVICE_HTTP20_ONLY_PORT` instead. With
-`HTTP20_PROXY_MODE` set to `all` or `disabled`, `SITE_PORT`'s behavior is unchanged.
 
 ### Verification App Settings
 

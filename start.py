@@ -113,9 +113,13 @@ _SAMPLE_APP_CHILD_FLAG = "--run-sample-app"
 def _pyinstaller_collect_hidden_imports() -> None:
     # PyInstaller analyzes import bytecode without executing this function.
     # Keeping the child apps importable here makes their transitive stdlib
-    # dependencies part of the frozen bundle.
+    # dependencies part of the frozen bundle. sample_app.py itself imports
+    # _sample_app_shared via a runtime sys.path insert (so it also works when
+    # run standalone as a plain script, which can't use package-relative
+    # imports) rather than `from . import`, so list it explicitly here too.
     from src import app as _embedded_app  # noqa: F401
     from src import sample_app as _embedded_sample_app  # noqa: F401
+    from src import _sample_app_shared as _embedded_sample_app_shared  # noqa: F401
 
 
 def _setup_job_object() -> None:
@@ -929,6 +933,13 @@ def main() -> None:
     child_env: dict[str, str] = {}
     if args.app_upstream is not None:
         child_env["APP_UPSTREAM"] = _get(env, "APP_UPSTREAM", "")
+    if verbose:
+        # --verbose is a CLI-only flag (not necessarily reflected in
+        # config.toml's own VERBOSE key, which app.py reads independently),
+        # so force it into app.py's environment too — --verbose/VERBOSE
+        # is one setting covering both start.py's own config dump and
+        # app.py's protocol-level debug logging.
+        child_env["VERBOSE"] = "true"
     app_extra_args: list[str] = []
     if args.config is not None:
         app_extra_args = ["--config", str(config_file)]

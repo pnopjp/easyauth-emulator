@@ -5,6 +5,7 @@ import html
 import http.client
 import json
 import os
+import queue
 import re
 import socket
 import ssl
@@ -22,6 +23,7 @@ import h2.config
 import h2.connection
 import h2.events
 import h2.exceptions
+import h2.settings
 
 # Force UTF-8 output regardless of the system locale (e.g. cp932 on Japanese
 # Windows) — same rationale as start.py's identical reconfigure call. This
@@ -206,6 +208,10 @@ def _parse_bool_cfg(name: str, default: str = "false") -> bool:
 
 
 DEBUG_HEADERS_ENDPOINT_ENABLED = _parse_bool_cfg("DEBUG_HEADERS_ENDPOINT_ENABLED")
+# General-purpose verbose logging switch (stderr) for diagnosing protocol-level
+# issues (e.g. exactly what headers a real client sent) without needing to add
+# and remove ad hoc print statements each time.
+VERBOSE = _parse_bool_cfg("VERBOSE")
 TLS_CERT_FILE = (_cfg("TLS_CERT_FILE") or "").strip()
 TLS_KEY_FILE  = (_cfg("TLS_KEY_FILE")  or "").strip()
 _TLS_ENABLED  = bool(TLS_CERT_FILE and TLS_KEY_FILE)
@@ -225,22 +231,38 @@ COOKIE_SECURE = _parse_bool_cfg("OAUTH2_PROXY_COOKIE_SECURE") or _TLS_ENABLED
 # starts with application/grpc. HTTP20_PROXY_MODE only has any effect while
 # HTTP20_ENABLED is on — with it off, SITE_PORT never receives an HTTP/2
 # request to preserve in the first place, so every request is relayed as
-# HTTP/1.1 regardless of HTTP20_PROXY_MODE (APPSERVICE_HTTP20_ONLY_PORT below
-# is the one exception: that dedicated port is HTTP/2 end to end regardless
-# of HTTP20_ENABLED).
+# HTTP/1.1 regardless of HTTP20_PROXY_MODE.
 HTTP20_ENABLED = _parse_bool_cfg("HTTP20_ENABLED")
 HTTP20_PROXY_MODE = (_cfg("HTTP20_PROXY_MODE", "disabled") or "disabled").strip().lower()
 if HTTP20_PROXY_MODE not in ("disabled", "all", "grpc-only"):
     HTTP20_PROXY_MODE = "disabled"
 
-# Dedicated HTTP/2-only port mirroring Azure App Service's HTTP20_ONLY_PORT
-# app setting (the separate port App Service requires for gRPC, distinct
-# from SITE_PORT — unlike Azure Container Apps, which multiplexes gRPC on a
-# single ingress port and has no equivalent of this). Prefixed with
+# Mirrors Azure App Service's "Web sockets" on/off switch (ARM property
+# webSocketsEnabled) — a separate setting from HTTP20_ENABLED/HTTP20_PROXY_MODE.
+# Defaults to on, unlike that ARM property's own default, because real Linux
+# App Service was confirmed (2026-07-10) to ignore this setting entirely —
+# WebSocket (both the classic HTTP/1.1 Upgrade and the RFC 8441 HTTP/2
+# extended CONNECT) keeps working end to end even with webSocketsEnabled
+# explicitly set to false. The portal's own "General settings" page doesn't
+# even show the toggle for a Linux plan (only Windows), consistent with this.
+# This setting exists in the emulator for Windows App Service fidelity;
+# defaulting it to on keeps the emulator's long-standing (Linux-matching)
+# behavior unchanged for anyone not using it.
+WEB_SOCKETS_ENABLED = _parse_bool_cfg("WEB_SOCKETS_ENABLED", "true")
+
+# Mirrors Azure App Service's HTTP20_ONLY_PORT app setting. Confirmed against
+# a real App Service instance (grpcurl against the app's ordinary :443
+# endpoint — never a separate client-facing port — with server reflection
+# metadata showing the request reached the app) that this is purely an
+# upstream/container-side routing detail: clients always connect to the
+# same endpoint as everything else, and Azure's front-end internally
+# forwards HTTP/2-relayed traffic (see _wants_http2_upstream) to this port
+# on APP_UPSTREAM's own host instead of its regular port — the app itself
+# is expected to have a second listener bound here. Prefixed with
 # APPSERVICE_ (rather than reusing Azure's literal name verbatim) since,
-# unlike HTTP20_ENABLED/HTTP20_PROXY_MODE, this whole port topology has no
-# Container Apps counterpart at all — the prefix signals at a glance that
-# Container Apps users can leave it unset.
+# unlike HTTP20_ENABLED/HTTP20_PROXY_MODE, this has no Container Apps
+# counterpart at all (single ingress, no separate port concept) — the
+# prefix signals at a glance that Container Apps users can leave it unset.
 _APPSERVICE_HTTP20_ONLY_PORT_RAW = (_cfg("APPSERVICE_HTTP20_ONLY_PORT") or "").strip()
 try:
     APPSERVICE_HTTP20_ONLY_PORT = int(_APPSERVICE_HTTP20_ONLY_PORT_RAW) if _APPSERVICE_HTTP20_ONLY_PORT_RAW else None
@@ -686,18 +708,13 @@ class _RoutingMixin:
     def _is_grpc_request(self) -> bool:
         return self._header("Content-Type").lower().startswith("application/grpc")
 
-    # Set to True on instances handling a connection accepted on
-    # APPSERVICE_HTTP20_ONLY_PORT — see _wants_http2_upstream.
-    _force_http2_upstream = False
-
     def _wants_http2_upstream(self) -> bool:
         """Whether this request should be relayed to APP_UPSTREAM over HTTP/2
         rather than downgraded to HTTP/1.1, per HTTP20_PROXY_MODE (mirrors
-        App Service's http20ProxyFlag: disabled/all/grpc-only)."""
-        if self._force_http2_upstream:
-            # Arrived on APPSERVICE_HTTP20_ONLY_PORT — that dedicated port is
-            # HTTP/2 end to end by definition, regardless of HTTP20_PROXY_MODE.
-            return True
+        App Service's http20ProxyFlag: disabled/all/grpc-only). When true and
+        APPSERVICE_HTTP20_ONLY_PORT is set, _proxy_to also redirects the
+        connection to that port on APP_UPSTREAM's host instead of its own
+        port, mirroring Azure's own internal routing — see _proxy_to."""
         if not HTTP20_ENABLED:
             # SITE_PORT never accepts HTTP/2 from a client in the first
             # place, so there is no inbound HTTP/2-ness for HTTP20_PROXY_MODE
@@ -707,10 +724,6 @@ class _RoutingMixin:
         if HTTP20_PROXY_MODE == "all":
             return True
         if HTTP20_PROXY_MODE == "grpc-only":
-            if APPSERVICE_HTTP20_ONLY_PORT:
-                # gRPC is expected to arrive via the dedicated port instead,
-                # so SITE_PORT no longer special-cases it by Content-Type.
-                return False
             return self._is_grpc_request()
         return False
 
@@ -733,6 +746,14 @@ class _RoutingMixin:
         # ever speaks plain HTTP/1.1, so callers proxying to it pass
         # force_http1=True to bypass HTTP20_PROXY_MODE entirely.
         relay_as_http2 = False if force_http1 else self._wants_http2_upstream()
+        if relay_as_http2 and APPSERVICE_HTTP20_ONLY_PORT:
+            # Mirrors Azure App Service: HTTP20_ONLY_PORT tells the platform
+            # which port on the SAME container to forward HTTP/2-relayed
+            # traffic to, instead of the app's regular port — confirmed
+            # against a real App Service instance that this is purely an
+            # upstream-side routing detail (see the APPSERVICE_HTTP20_ONLY_PORT
+            # comment above).
+            port = APPSERVICE_HTTP20_ONLY_PORT
         strip = (strip_headers or frozenset()) | (_HOP_BY_HOP_HTTP2 if relay_as_http2 else _HOP_BY_HOP)
         headers: dict[str, str] = {}
         for name, value in self._all_headers():
@@ -1095,23 +1116,19 @@ class _RoutingMixin:
         self._redirect(f"/.auth/login?post_login_redirect_uri={quote(self.path, safe=_URL_SAFE)}")
 
     def _is_websocket_upgrade_request(self) -> bool:
+        """HTTP/1.1's Upgrade mechanism (RFC 6455). _Http2StreamHandler
+        overrides this with the RFC 8441 extended CONNECT equivalent, since
+        HTTP/2 forbids the Connection/Upgrade header fields entirely."""
         return (
-            "websocket" in self._header("Upgrade").lower()
+            WEB_SOCKETS_ENABLED
+            and "websocket" in self._header("Upgrade").lower()
             and "upgrade" in self._header("Connection").lower()
         )
 
     def _proxy_websocket(self, target_base: str, extra_headers: "dict[str, str] | None" = None) -> None:
-        """Relay a WebSocket Upgrade handshake, then the raw bidirectional
-        connection itself, until either side closes. RFC 6455's Upgrade
-        mechanism is an HTTP/1.1 concept, so only _Handler implements this —
-        WebSocket bootstrapping over HTTP/2 (RFC 8441, extended CONNECT) is a
-        distinct, unimplemented feature; this default just rejects it
-        cleanly. In practice this is never hit: h2's default SETTINGS
-        (h2.config.H2Configuration, used unmodified by _Http2Connection)
-        advertise ENABLE_CONNECT_PROTOCOL=0, and RFC 8441 requires a client
-        to see that enabled before attempting it — so any compliant client
-        just falls back to an ordinary HTTP/1.1 WebSocket connection instead,
-        which _Handler already handles."""
+        """Abstract: both _Handler (HTTP/1.1 Upgrade) and _Http2StreamHandler
+        (RFC 8441 extended CONNECT) provide their own implementation, so this
+        default is never actually reached."""
         self._send_empty(501)
 
     def _handle_protected(self) -> None:
@@ -1413,10 +1430,17 @@ class _Http2StreamHandler(_RoutingMixin):
     streams."""
 
     def __init__(self, conn: "_Http2Connection", stream_id: int,
-                 pseudo_headers: "dict[str, str]", headers: "list[tuple[str, str]]", body: bytes) -> None:
+                 pseudo_headers: "dict[str, str]", headers: "list[tuple[str, str]]", body: "bytes | None",
+                 inbound_queue: "queue.Queue | None" = None) -> None:
         self._conn = conn
         self._stream_id = stream_id
         self._body = body
+        # Only set for an RFC 8441 extended CONNECT (see _Http2Connection):
+        # inbound DATA frames arrive live via this queue instead of being
+        # buffered up front, since the client keeps the stream's send side
+        # open for the lifetime of the WebSocket tunnel.
+        self._inbound_queue = inbound_queue
+        self._protocol_pseudo = pseudo_headers.get(":protocol", "")
         self.path = pseudo_headers.get(":path", "/")
         self.command = pseudo_headers.get(":method", "GET")
         self._scheme_value = pseudo_headers.get(":scheme", "http")
@@ -1522,6 +1546,129 @@ class _Http2StreamHandler(_RoutingMixin):
         else:
             self._conn.end_stream(self._stream_id)
 
+    def _is_websocket_upgrade_request(self) -> bool:
+        # RFC 8441: HTTP/2 forbids Connection/Upgrade header fields, so the
+        # bootstrap is instead an extended CONNECT carrying :protocol.
+        return WEB_SOCKETS_ENABLED and self.command == "CONNECT" and self._protocol_pseudo == "websocket"
+
+    def _proxy_websocket(self, target_base: str, extra_headers: "dict[str, str] | None" = None) -> None:
+        """RFC 8441 extended CONNECT bootstrap. Confirmed against a real
+        Azure App Service instance (tests/protocol/azure-websocket-poc) that
+        Azure's own HTTP/2 front-end always downgrades this to a classic
+        HTTP/1.1 Upgrade handshake before forwarding to the backend,
+        regardless of HTTP20_PROXY_MODE — so the backend never needs RFC
+        8441 support itself, and neither does this relay. It just
+        synthesizes the Connection/Upgrade header fields HTTP/2 itself
+        forbids (RFC 7540 8.1.2.2) from the extended CONNECT's regular
+        headers, same as Azure does.
+
+        A real browser's extended CONNECT also omits Sec-WebSocket-Key
+        (confirmed via DevTools against Edge/Chrome) — RFC 8441 has no need
+        for RFC 6455's classic handshake nonce, since HTTP/2 doesn't have the
+        cross-protocol confusion risk that nonce defends against. An upstream
+        that still expects one (like tests/protocol/app.py, or any ordinary
+        RFC 6455 server) would otherwise reject the synthesized Upgrade
+        request outright, so one is synthesized here too if missing."""
+        parsed = urlsplit(target_base)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        target_path = (parsed.path or "").rstrip("/")
+        req_path = target_path + self.path if target_path else self.path
+
+        if VERBOSE:
+            print(f"[app] extended CONNECT headers as received: {self._all_headers()!r}", file=sys.stderr)
+
+        headers: dict[str, str] = {"Connection": "Upgrade", "Upgrade": "websocket"}
+        for name, value in self._all_headers():
+            if name.lower() in _AUTH_HEADERS_TO_STRIP:
+                continue
+            headers[name] = value
+        if extra_headers:
+            headers.update(extra_headers)
+        if not any(name.lower() == "sec-websocket-key" for name in headers):
+            headers["Sec-WebSocket-Key"] = base64.b64encode(os.urandom(16)).decode()
+
+        try:
+            upstream_sock = socket.create_connection((host, port), timeout=10)
+        except OSError as exc:
+            print(f"[app] upstream WebSocket connect to {host}:{port} failed: {exc!r}", file=sys.stderr)
+            self._send_empty(502)
+            return
+
+        try:
+            request_line = f"GET {req_path} HTTP/1.1\r\n"
+            header_lines = "".join(f"{name}: {value}\r\n" for name, value in headers.items())
+            upstream_sock.sendall((request_line + header_lines + "\r\n").encode("latin-1"))
+
+            resp_buf = b""
+            upstream_sock.settimeout(10)
+            while b"\r\n\r\n" not in resp_buf:
+                chunk = upstream_sock.recv(4096)
+                if not chunk:
+                    break
+                resp_buf += chunk
+
+            header_part, sep, leftover = resp_buf.partition(b"\r\n\r\n")
+            if not sep:
+                print(f"[app] upstream WebSocket handshake with {host}:{port} closed before completing", file=sys.stderr)
+                self._send_empty(502)
+                return
+
+            status_parts = header_part.split(b"\r\n", 1)[0].split(b" ", 2)
+            if len(status_parts) < 2 or status_parts[1] != b"101":
+                # Upstream declined the Upgrade. HTTP/2 has no status line to
+                # relay verbatim, so translate its ordinary HTTP/1.1 response
+                # into an HTTP/2 one instead.
+                status = int(status_parts[1]) if len(status_parts) >= 2 and status_parts[1].isdigit() else 502
+                self._send_raw_response(status, [], leftover)
+                return
+
+            # RFC 8441: a successful extended CONNECT is answered with
+            # :status 200 (not 101 — establishing the tunnel is the stream
+            # itself, there is no separate status-line concept to switch
+            # via). From here the stream carries raw WebSocket frames as
+            # DATA in both directions until either side ends it.
+            self._conn.send_stream_headers(self._stream_id, 200, [])
+            upstream_sock.settimeout(None)
+            if leftover:
+                self._conn.send_stream_data(self._stream_id, leftover)
+
+            def _pump_upstream_to_client() -> None:
+                try:
+                    while True:
+                        data = upstream_sock.recv(65536)
+                        if not data:
+                            break
+                        self._conn.send_stream_data(self._stream_id, data)
+                except OSError:
+                    pass
+                finally:
+                    self._conn.end_stream(self._stream_id)
+
+            t = threading.Thread(target=_pump_upstream_to_client, daemon=True)
+            t.start()
+            try:
+                while True:
+                    data = self._inbound_queue.get()
+                    if data is None:
+                        break
+                    upstream_sock.sendall(data)
+            except OSError:
+                pass
+            finally:
+                try:
+                    upstream_sock.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+            t.join(timeout=5)
+        except (ConnectionError, OSError) as exc:
+            print(f"[app] WebSocket relay to {host}:{port} failed: {exc!r}", file=sys.stderr)
+        finally:
+            try:
+                upstream_sock.close()
+            except OSError:
+                pass
+
 
 class _Http2Connection:
     """Owns one TCP connection's H2Connection state machine. run() executes
@@ -1534,9 +1681,8 @@ class _Http2Connection:
     control window would need proper windowed sending, not implemented here.
     """
 
-    def __init__(self, sock: "socket.socket", force_relay_http2: bool = False) -> None:
+    def __init__(self, sock: "socket.socket") -> None:
         self._sock = sock
-        self._force_relay_http2 = force_relay_http2
         self._conn = h2.connection.H2Connection(config=h2.config.H2Configuration(client_side=False))
         self._write_lock = threading.RLock()
         self._streams: "dict[int, dict]" = {}
@@ -1547,6 +1693,11 @@ class _Http2Connection:
 
     def run(self) -> None:
         self._conn.initiate_connection()
+        if WEB_SOCKETS_ENABLED:
+            # RFC 8441: only a server that advertises this may receive an
+            # extended CONNECT. Confirmed this is exactly what real Azure App
+            # Service does too (tests/protocol/azure-websocket-poc).
+            self._conn.update_settings({h2.settings.SettingCodes.ENABLE_CONNECT_PROTOCOL: 1})
         self._flush()
         try:
             while True:
@@ -1577,24 +1728,62 @@ class _Http2Connection:
 
     def _handle_event(self, event) -> None:
         if isinstance(event, h2.events.RequestReceived):
-            self._streams[event.stream_id] = {"headers": event.headers, "body": bytearray()}
+            if WEB_SOCKETS_ENABLED and self._is_extended_connect(event.headers):
+                # RFC 8441: the client keeps this stream's send side open for
+                # the WebSocket tunnel's whole lifetime, so — unlike an
+                # ordinary request — waiting for StreamEnded before
+                # dispatching would mean never dispatching it at all (the
+                # same root cause as the gRPC bidirectional-streaming gap
+                # tracked in ToDo.md). Dispatch immediately instead, and
+                # stream inbound DATA frames to the handler live via a queue
+                # rather than buffering them.
+                q: "queue.Queue" = queue.Queue()
+                self._streams[event.stream_id] = {"queue": q}
+                threading.Thread(
+                    target=self._dispatch_stream,
+                    args=(event.stream_id, event.headers, None),
+                    kwargs={"inbound_queue": q},
+                    daemon=True,
+                ).start()
+            else:
+                self._streams[event.stream_id] = {"headers": event.headers, "body": bytearray()}
         elif isinstance(event, h2.events.DataReceived):
             stream = self._streams.get(event.stream_id)
             if stream is not None:
-                stream["body"] += event.data
+                if "queue" in stream:
+                    stream["queue"].put(event.data)
+                else:
+                    stream["body"] += event.data
             self._conn.acknowledge_received_data(len(event.data), event.stream_id)
         elif isinstance(event, h2.events.StreamEnded):
             stream = self._streams.pop(event.stream_id, None)
             if stream is not None:
-                threading.Thread(
-                    target=self._dispatch_stream,
-                    args=(event.stream_id, stream["headers"], bytes(stream["body"])),
-                    daemon=True,
-                ).start()
+                if "queue" in stream:
+                    stream["queue"].put(None)  # EOF sentinel
+                else:
+                    threading.Thread(
+                        target=self._dispatch_stream,
+                        args=(event.stream_id, stream["headers"], bytes(stream["body"])),
+                        daemon=True,
+                    ).start()
         elif isinstance(event, h2.events.StreamReset):
-            self._streams.pop(event.stream_id, None)
+            stream = self._streams.pop(event.stream_id, None)
+            if stream is not None and "queue" in stream:
+                stream["queue"].put(None)
 
-    def _dispatch_stream(self, stream_id: int, raw_headers, body: bytes) -> None:
+    @staticmethod
+    def _is_extended_connect(raw_headers) -> bool:
+        method = protocol = None
+        for name, value in raw_headers:
+            name = name.decode() if isinstance(name, bytes) else name
+            if name == ":method":
+                method = value.decode() if isinstance(value, bytes) else value
+            elif name == ":protocol":
+                protocol = value.decode() if isinstance(value, bytes) else value
+        return method == "CONNECT" and protocol == "websocket"
+
+    def _dispatch_stream(self, stream_id: int, raw_headers, body: "bytes | None",
+                          inbound_queue: "queue.Queue | None" = None) -> None:
         pseudo: "dict[str, str]" = {}
         headers: "list[tuple[str, str]]" = []
         for name, value in raw_headers:
@@ -1604,8 +1793,7 @@ class _Http2Connection:
                 pseudo[name] = value
             else:
                 headers.append((name, value))
-        handler = _Http2StreamHandler(self, stream_id, pseudo, headers, body)
-        handler._force_http2_upstream = self._force_relay_http2
+        handler = _Http2StreamHandler(self, stream_id, pseudo, headers, body, inbound_queue=inbound_queue)
         try:
             handler._dispatch()
         except Exception:
@@ -1796,7 +1984,22 @@ def _looks_like_http2_preface(sock: "socket.socket") -> bool:
     return len(peeked) > 0 and HTTP2_CONNECTION_PREFACE.startswith(peeked)
 
 
-class _MultiplexingServer(ThreadingHTTPServer):
+class _QuietErrorServerMixin:
+    """Replaces the traceback socketserver otherwise prints to stderr when a
+    peer resets the connection mid-request (e.g. a browser tab closed, or the
+    upstream killed, while a WebSocket session is active) with a single quiet
+    line — expected background noise, not worth a full traceback, but still
+    worth a trace that it happened."""
+
+    def handle_error(self, request, client_address) -> None:
+        exc_type = sys.exc_info()[0]
+        if exc_type in (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            print(f"[app] connection from {client_address} reset (peer disconnected)", file=sys.stderr)
+            return
+        super().handle_error(request, client_address)
+
+
+class _MultiplexingServer(_QuietErrorServerMixin, ThreadingHTTPServer):
     """Accepts both HTTP/1.1 and HTTP/2 on the same SITE_PORT (when
     HTTP20_ENABLED) — mirrors App Service's "HTTP version: 2.0" being additive
     to, not exclusive of, HTTP/1.1. Peeks at each new connection (or checks
@@ -1816,16 +2019,6 @@ class _MultiplexingServer(ThreadingHTTPServer):
         _Handler(request, client_address, self)
 
 
-class _Http2OnlyServer(ThreadingHTTPServer):
-    """APPSERVICE_HTTP20_ONLY_PORT listener — mirrors Azure App Service's
-    dedicated gRPC port: every connection here is HTTP/2 (h2c, or TLS
-    restricted to ALPN "h2"), unconditionally. No protocol sniffing needed
-    (unlike _MultiplexingServer) since this port never speaks HTTP/1.1."""
-
-    def finish_request(self, request, client_address) -> None:
-        _Http2Connection(request, force_relay_http2=True).run()
-
-
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1833,19 +2026,11 @@ class _Http2OnlyServer(ThreadingHTTPServer):
 
 def main() -> None:
     port = int(SITE_PORT)
-    if APPSERVICE_HTTP20_ONLY_PORT == port:
-        print(
-            f"[app] ERROR: APPSERVICE_HTTP20_ONLY_PORT ({APPSERVICE_HTTP20_ONLY_PORT}) "
-            f"must differ from SITE_PORT ({port})",
-            file=sys.stderr,
-        )
-        sys.exit(1)
     if sys.platform == "win32":
         # On Windows, SO_REUSEADDR lets a second process bind an in-use port,
         # silently splitting requests between two gateway instances (e.g. a
         # stale emulator left over from a crashed session) — fail fast instead.
         _MultiplexingServer.allow_reuse_address = False
-        _Http2OnlyServer.allow_reuse_address = False
     try:
         server = _MultiplexingServer(("0.0.0.0", port), _Handler)
     except OSError as exc:
@@ -1868,30 +2053,6 @@ def main() -> None:
         print(f"[app] Listening on https://0.0.0.0:{port}" + (" (HTTP/2 enabled)" if HTTP20_ENABLED else ""))
     else:
         print(f"[app] Listening on http://0.0.0.0:{port}" + (" (HTTP/2 enabled)" if HTTP20_ENABLED else ""))
-
-    if APPSERVICE_HTTP20_ONLY_PORT:
-        try:
-            dedicated_server = _Http2OnlyServer(("0.0.0.0", APPSERVICE_HTTP20_ONLY_PORT), _Handler)
-        except OSError as exc:
-            print(
-                f"[app] ERROR: cannot listen on port {APPSERVICE_HTTP20_ONLY_PORT} "
-                f"(APPSERVICE_HTTP20_ONLY_PORT): {exc}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if _TLS_ENABLED:
-            dedicated_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            try:
-                dedicated_ctx.load_cert_chain(TLS_CERT_FILE, TLS_KEY_FILE)
-            except Exception as exc:
-                print(f"[app] ERROR: Failed to load TLS certificate: {exc}", file=sys.stderr)
-                sys.exit(1)
-            dedicated_ctx.set_alpn_protocols(["h2"])
-            dedicated_server.socket = dedicated_ctx.wrap_socket(dedicated_server.socket, server_side=True)
-            print(f"[app] Listening on https://0.0.0.0:{APPSERVICE_HTTP20_ONLY_PORT} (HTTP/2 only, mirrors App Service's HTTP20_ONLY_PORT)")
-        else:
-            print(f"[app] Listening on http://0.0.0.0:{APPSERVICE_HTTP20_ONLY_PORT} (HTTP/2 only, mirrors App Service's HTTP20_ONLY_PORT)")
-        threading.Thread(target=dedicated_server.serve_forever, daemon=True).start()
 
     server.serve_forever()
 
