@@ -15,6 +15,7 @@ const STDOUT_PATTERNS: RegExp[] = [
     /Running on http:\/\/[^:]+:(\d+)/,
     /Uvicorn running on https?:\/\/[^:]+:(\d+)/,
     /[Ll]istening on https?:\/\/[^:]+:(\d+)/,
+    /Local URL:\s*https?:\/\/[^:]+:(\d+)/, // Streamlit
 ];
 
 export class PortDetector {
@@ -193,10 +194,11 @@ export class PortDetector {
             if (p !== null) return p;
         }
 
-        // --port / -p / --bind argument in args array (Flask, uvicorn, gunicorn, etc.)
+        // --port / -p / --bind / --server.port argument in args array
+        // (Flask, uvicorn, gunicorn, Streamlit, etc.)
         const args = Array.isArray(cfg['args']) ? (cfg['args'] as unknown[]).map(String) : [];
         for (let i = 0; i < args.length - 1; i++) {
-            if (args[i] === '--port' || args[i] === '-p' || args[i] === '--bind') {
+            if (args[i] === '--port' || args[i] === '-p' || args[i] === '--bind' || args[i] === '--server.port') {
                 // --bind may be "0.0.0.0:8000"
                 const raw = args[i + 1];
                 const m = raw.match(/:?(\d+)$/);
@@ -299,6 +301,15 @@ export class PortDetector {
                 }
                 case 'nodejs':
                 case 'python': {
+                    if (framework === 'python') {
+                        const streamlitConfigPath = path.join(root, '.streamlit', 'config.toml');
+                        if (fs.existsSync(streamlitConfigPath)) {
+                            const content = fs.readFileSync(streamlitConfigPath, 'utf-8');
+                            const serverSection = content.match(/\[server\]([\s\S]*?)(?:\n\[|$)/);
+                            const m = serverSection?.[1].match(/^\s*port\s*=\s*(\d+)/m);
+                            if (m) return parseInt(m[1], 10);
+                        }
+                    }
                     const envPath = path.join(root, '.env');
                     if (fs.existsSync(envPath)) {
                         const content = fs.readFileSync(envPath, 'utf-8');

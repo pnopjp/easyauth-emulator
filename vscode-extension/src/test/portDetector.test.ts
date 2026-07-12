@@ -32,6 +32,9 @@ suite('PortDetector: extractPortFromText', () => {
         // Uvicorn
         ['Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)', 8000],
         ['Uvicorn running on https://0.0.0.0:8443',          8443],
+        // Streamlit
+        ['  Local URL: http://localhost:8501',                8501],
+        ['Local URL: https://localhost:8502',                 8502],
     ];
 
     for (const [text, expected] of matchCases) {
@@ -131,5 +134,10 @@ suite('PortDetector: portFromLaunchConfig', () => {
 
     test('returns null when nothing is configured', () => {
         assert.strictEqual((detector as any).portFromLaunchConfig({}), null);
+    });
+
+    test('reads --server.port from args (Streamlit)', () => {
+        const cfg = { args: ['run', 'chat.py', '--server.port', '8501'] };
+        assert.strictEqual((detector as any).portFromLaunchConfig(cfg), 8501);
     });
 });

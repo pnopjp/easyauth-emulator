@@ -223,6 +223,7 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 | .NET | `launchSettings.json` | `applicationUrl` |
 | Spring Boot | `application.properties` | `server.port` |
 | Spring Boot | `application.yml` | `server.port` |
+| Streamlit | `.streamlit/config.toml` | `[server] port` |
 | Node.js / Python | `.env` | `PORT` |
 
 #### stdout 解析パターン（優先度 4）
@@ -236,6 +237,7 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 | Node.js / Express | `listening on.*port (\d+)` |
 | Flask | `Running on http://[^:]+:(\d+)` |
 | FastAPI / Uvicorn | `Uvicorn running on https?://[^:]+:(\d+)` |
+| Streamlit | `Local URL:\s*https?://[^:]+:(\d+)` |
 
 #### ポートスキャン仕様（優先度 5）
 
