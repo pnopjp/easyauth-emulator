@@ -222,6 +222,7 @@ Example: `https://localhost:7000;http://localhost:5000` → `5000` is used
 | .NET | `launchSettings.json` | `applicationUrl` |
 | Spring Boot | `application.properties` | `server.port` |
 | Spring Boot | `application.yml` | `server.port` |
+| Streamlit | `.streamlit/config.toml` | `[server] port` |
 | Node.js / Python | `.env` | `PORT` |
 
 #### stdout Parsing Patterns (Priority 4)
@@ -235,6 +236,7 @@ Used when the debug adapter exposes OutputEvents. Skipped if not available.
 | Node.js / Express | `listening on.*port (\d+)` |
 | Flask | `Running on http://[^:]+:(\d+)` |
 | FastAPI / Uvicorn | `Uvicorn running on https?://[^:]+:(\d+)` |
+| Streamlit | `Local URL:\s*https?://[^:]+:(\d+)` |
 
 #### Port Scan Specification (Priority 5)
 
