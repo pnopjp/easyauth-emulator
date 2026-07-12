@@ -418,6 +418,16 @@ export class EmulatorManager implements vscode.Disposable {
         if (tlsCertFile) extra['TLS_CERT_FILE'] = tlsCertFile;
         const tlsKeyFile = config.get<string>('tls.keyFile', '').trim();
         if (tlsKeyFile) extra['TLS_KEY_FILE'] = tlsKeyFile;
+        if (config.get<boolean>('http20Enabled', false)) {
+            extra['HTTP20_ENABLED'] = 'true';
+        }
+        const http20ProxyMode = config.get<string>('http20ProxyMode', '').trim();
+        if (http20ProxyMode) extra['HTTP20_PROXY_MODE'] = http20ProxyMode;
+        const appserviceHttp20OnlyPort = config.get<number | null>('appserviceHttp20OnlyPort', null);
+        if (appserviceHttp20OnlyPort !== null) extra['APPSERVICE_HTTP20_ONLY_PORT'] = String(appserviceHttp20OnlyPort);
+        if (!config.get<boolean>('webSocketsEnabled', true)) {
+            extra['WEB_SOCKETS_ENABLED'] = 'false';
+        }
 
         // Global IDP settings
         const defaultIdp = config.get<string>('defaultIdp', '').trim();

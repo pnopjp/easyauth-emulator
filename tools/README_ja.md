@@ -65,3 +65,12 @@ IDP_APPLE_CLIENT_SECRET = "<client_secret.jwt の内容>"
 ### 有効期限
 
 生成される JWT の有効期間は **180 日**です（Apple が定める上限）。有効期限が切れる前に再生成し、`config.toml` の `IDP_<NAME>_CLIENT_SECRET` を新しい JWT の内容に更新してください。
+
+---
+
+## azure-poc/
+
+実機の Azure App Service にデプロイして、自動テストからは検証できない実際の挙動(RFC 8441・gRPC と Easy Auth の関係など)を確認するための使い捨てアプリ集です。自動テストからは一切参照されません。詳細は各サブディレクトリの README を参照してください。
+
+- `azure-grpc-poc/` — Easy Auth が gRPC(`HTTP20_ONLY_PORT`)も保護するかを検証
+- `azure-websocket-poc/` — WebSocket over HTTP/2(RFC 8441)の実機挙動を検証

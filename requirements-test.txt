@@ -1,0 +1,4 @@
+pytest
+grpcio
+grpcio-tools
+grpcio-reflection

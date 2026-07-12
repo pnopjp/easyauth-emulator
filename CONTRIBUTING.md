@@ -83,6 +83,23 @@ To skip the PyInstaller build and repackage an existing `dist/` output:
 python scripts/package.py --skip-build
 ```
 
+### Python Tests
+
+Install dependencies into this project's own `.venv`, not your global/system Python — installing
+`requirements-test.txt` globally can upgrade shared packages (`protobuf`, `grpcio`) and break
+unrelated projects on your machine.
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt -r requirements-test.txt
+```
+
+Run the suite:
+
+```powershell
+.venv\Scripts\python -m pytest tests/python/ -v
+```
+
 ---
 
 ## Debug the Core Emulator (F5)
@@ -103,7 +120,7 @@ Create `config.toml` in the project root (copy from `config.toml.example` and fi
 
 ## Verification App (sample_app)
 
-`src/sample_app.py` is an optional verification app that displays the authenticated user's claims and tests delegated Azure Blob Storage access. Use it to confirm that the emulator is injecting Easy Auth-compatible headers correctly.
+`src/sample_app.py` is an optional verification app that displays the authenticated user's claims and tests delegated Azure Blob Storage access. Use it to confirm that the emulator is injecting Easy Auth-compatible headers correctly. It also has a `/protocol` page for testing WebSocket/SSE/chunked-request-body behavior through the gateway — see `tests/protocol/README.md` for the same demo with gRPC added too (dev-only, not shipped with the emulator's binary).
 
 ### Enable
 

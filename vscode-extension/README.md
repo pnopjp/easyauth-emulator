@@ -221,6 +221,10 @@ The extension always passes `--config .vscode/easyauth.toml` to the emulator on 
 | `easyauth.site.port` | `8080` | Listen port of the EasyAuth gateway (also the public port when accessed directly) |
 | `easyauth.tls.certFile` | `""` | Path to the TLS certificate file (PEM). Set with `tls.keyFile` to enable HTTPS. Required for Facebook Login. |
 | `easyauth.tls.keyFile` | `""` | Path to the TLS private key file (PEM). Set with `tls.certFile` to enable HTTPS. Required for Facebook Login. |
+| `easyauth.http20Enabled` | `false` | Accept HTTP/2 on `site.port`, alongside HTTP/1.1 |
+| `easyauth.http20ProxyMode` | `disabled` | How much of an HTTP/2 request is relayed as-is to the upstream app: `disabled`, `all`, or `grpc-only` |
+| `easyauth.appserviceHttp20OnlyPort` | unset | Mirrors Azure App Service's `HTTP20_ONLY_PORT` (leave unset for Azure Container Apps). When a request is relayed over HTTP/2, it's sent to this port on the upstream app's host instead of the app's regular port. |
+| `easyauth.webSocketsEnabled` | `true` | Whether WebSocket (HTTP/1.1 Upgrade and HTTP/2 RFC 8441 extended CONNECT) is relayed at all, mirroring Azure App Service's "Web sockets" on/off switch. On Linux App Service this is always effectively on; only Windows App Service can actually turn it off. |
 | `easyauth.defaultIdp` | `""` | Default IdP when `/.auth/login` is accessed |
 | `easyauth.skipAuthRoutes` | `""` | Routes that bypass auth — comma-separated `[METHOD=]REGEX` patterns |
 | `easyauth.debugHeadersEndpointEnabled` | `false` | Enable `GET /.debug/headers` to inspect injected headers |

@@ -83,6 +83,23 @@ python scripts/package.py
 python scripts/package.py --skip-build
 ```
 
+### Python テスト
+
+依存関係はグローバル（システム）Pythonではなく、このプロジェクト専用の `.venv` にインストールしてください
+——`requirements-test.txt` をグローバルにインストールすると、共有パッケージ（`protobuf`・`grpcio`）が
+アップグレードされ、同じマシン上の無関係な他プロジェクトを壊す可能性があります。
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt -r requirements-test.txt
+```
+
+テストを実行する:
+
+```powershell
+.venv\Scripts\python -m pytest tests/python/ -v
+```
+
 ---
 
 ## エミュレーター本体のデバッグ（F5）
@@ -103,7 +120,7 @@ python scripts/package.py --skip-build
 
 ## 動作確認用アプリ（sample_app）
 
-`src/sample_app.py` は、認証済みユーザーの claim を表示し、Azure Blob Storage への委任アクセスをテストするオプションの動作確認用アプリです。エミュレーターが Easy Auth 互換ヘッダーを正しく注入しているか確認するために使用します。
+`src/sample_app.py` は、認証済みユーザーの claim を表示し、Azure Blob Storage への委任アクセスをテストするオプションの動作確認用アプリです。エミュレーターが Easy Auth 互換ヘッダーを正しく注入しているか確認するために使用します。ゲートウェイ経由のWebSocket/SSE/chunkedリクエストボディの動作確認用に`/protocol`ページも持っています(gRPCも含めた同種のデモは`tests/protocol/README_ja.md`を参照。こちらは開発用のみでエミュレーター本体の配布物には含まれません)。
 
 ### 有効化
 

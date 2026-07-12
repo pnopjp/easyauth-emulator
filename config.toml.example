@@ -14,14 +14,16 @@ SITE_PORT = "8080"
 # URL of the application that authenticated requests are forwarded to.
 # Defaults to http://localhost:8081 (same as the default SAMPLE_APP_PORT).
 # When SAMPLE_APP_ENABLED is false, set this to the port of your own application.
+# May also be https:// — see SSL_CA_BUNDLE below for certificate verification.
 APP_UPSTREAM = "http://localhost:8081"
 
 # Debug endpoint (default: disabled).
 # When true, enables GET /.debug/headers for inspecting forwarded headers.
 DEBUG_HEADERS_ENDPOINT_ENABLED = false
 
-# Print all resolved configuration values on startup (secrets masked).
-# Can also be enabled with the --verbose / -v CLI flag.
+# Print all resolved configuration values on startup (secrets masked), and
+# enable extra protocol-level diagnostic logging (e.g. exactly what headers a
+# request arrived with) to stderr. Can also be enabled with --verbose / -v.
 # VERBOSE = false
 
 # Routes that bypass authentication entirely (forwarded to upstream without auth check).
@@ -45,11 +47,39 @@ DEBUG_HEADERS_ENDPOINT_ENABLED = false
 # TLS_KEY_FILE  = "./server.key"
 
 # Path to a custom CA certificate bundle (PEM format).
-# Used for outbound HTTPS connections the emulator makes to GitHub (oauth2-proxy downloads).
-# Normally not needed — the OS certificate store (Windows, macOS, Linux) is used
-# automatically. Set this only when the required CA is not in the OS trust store.
+# Used for outbound HTTPS connections the emulator makes: to GitHub (oauth2-proxy
+# downloads), and to APP_UPSTREAM when it's https://. Normally not needed — the OS
+# certificate store (Windows, macOS, Linux) is used automatically (a locally-issued
+# dev cert, e.g. mkcert, verifies once its CA is installed into that store). Set this
+# only when the required CA is not in the OS trust store.
 # Example: SSL_CA_BUNDLE = "C:/certs/corporate-ca.pem"
 # SSL_CA_BUNDLE = ""
+
+# Accept HTTP/2 on SITE_PORT, alongside HTTP/1.1 (not exclusive of it — mirrors
+# Azure App Service's "HTTP version: 2.0"). See docs/configuration-reference.md
+# "HTTP/2 and gRPC" for details.
+# HTTP20_ENABLED = false
+
+# How much of an HTTP/2 request is preserved end to end to APP_UPSTREAM
+# (mirrors Azure App Service's http20ProxyFlag):
+#   disabled   — downgrade everything to HTTP/1.1 (breaks gRPC, fine otherwise)
+#   all        — relay everything as HTTP/2 (APP_UPSTREAM must speak HTTP/2)
+#   grpc-only  — relay only requests with a Content-Type of application/grpc*
+# HTTP20_PROXY_MODE = "disabled"
+
+# Mirrors Azure App Service's HTTP20_ONLY_PORT app setting (Container Apps
+# has no equivalent — it multiplexes gRPC on SITE_PORT instead, so leave
+# this unset for that case). Whenever a request is relayed to APP_UPSTREAM
+# over HTTP/2 (per HTTP20_PROXY_MODE above), it's sent to this port on
+# APP_UPSTREAM's host instead of APP_UPSTREAM's own port.
+# APPSERVICE_HTTP20_ONLY_PORT = 8082
+
+# Whether WebSocket (HTTP/1.1 Upgrade and HTTP/2 RFC 8441 extended CONNECT) is
+# relayed at all, mirroring Azure App Service's "Web sockets" on/off switch. On
+# Linux App Service this is always effectively on; only Windows App Service
+# can actually turn it off. Set to false to match a Windows App Service
+# instance with "Web sockets" turned off.
+# WEB_SOCKETS_ENABLED = true
 
 # ---- oauth2-proxy settings --------------------------------------------------
 

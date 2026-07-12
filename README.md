@@ -185,9 +185,7 @@ A VS Code extension in `vscode-extension/` automatically starts and stops the em
 - `/.auth/logout` always clears the local emulator and oauth2-proxy session first; provider-side browser SSO sign-out is best-effort.
 - Login flow includes emulator-specific behavior (`/.auth/login/select`, `DEFAULT_IDP`, single-item `IDP_LIST` default handling).
 - Session handling is based on oauth2-proxy cookies and emulator routing rules, so behavior can differ from managed Easy Auth internals.
-- WebSocket and gRPC are not supported (HTTP/1.1 request/response proxying only).
-- Server-Sent Events (SSE) and other streaming responses are not supported — the proxy buffers the full upstream response before replying, so long-lived streams will hang.
-- Request bodies sent with `Transfer-Encoding: chunked` (no `Content-Length`) are not forwarded to the upstream app.
+- gRPC is supported, but opt-in — see [HTTP/2 and gRPC](docs/configuration-reference.md#http2-and-grpc). It is off by default, mirroring Azure App Service's `http20ProxyFlag` defaulting to disabled.
 
 ## Unsupported Providers
 

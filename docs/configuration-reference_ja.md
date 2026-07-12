@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `--app-upstream URL` | — | `APP_UPSTREAM` を上書きする。`config.toml` および環境変数より優先。設定ファイルを編集せずに転送先ポートを変更したい場合に便利。 |
 | `--config PATH` | カレントディレクトリの `config.toml` | 設定ファイルのパス。 |
-| `--verbose`, `-v` | `false` | 起動時に全設定値を出力する（シークレットはマスク）。`config.toml` の `VERBOSE = true` と同等。 |
+| `--verbose`, `-v` | `false` | 起動時に全設定値を出力する（シークレットはマスク）ほか、プロトコルレベルの追加診断ログ（リクエストが実際にどのヘッダーで届いたか等）をstderrに出力する。`config.toml` の `VERBOSE = true` と同等。 |
 
 ## 設定パラメーター
 
@@ -24,11 +24,11 @@
 | `DEFAULT_IDP` | | — | 未認証時に使用する既定 IdP。`IDP_LIST` に含まれる値を指定。未設定時の挙動は下記参照。 |
 | `SITE_URL` | | `http://localhost` | リクエストに `Host` ヘッダーがない場合に使われるフォールバック URL（末尾スラッシュなし）。通常は変更不要。TLS 終端するフロント（リバースプロキシ）が `X-Forwarded-Proto` を送らない場合のみ `https://` の値を設定（dev tunnels は送る）。 |
 | `SITE_PORT` | | `8080` | このゲートウェイのリッスンポート（直接アクセスする場合は公開ポートを兼ねる）。 |
-| `APP_UPSTREAM` | | `http://localhost:8081` ※ | 認証済みリクエストの転送先 URL。自分のアプリを使う場合はそのアプリの URL を設定してください。 |
+| `APP_UPSTREAM` | | `http://localhost:8081` ※ | 認証済みリクエストの転送先 URL。自分のアプリを使う場合はそのアプリの URL を設定してください。`https://` も指定可能——証明書検証については `SSL_CA_BUNDLE` を参照。 |
 | `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | `GET /.debug/headers` 診断エンドポイントを有効化するか。有効時はその URL でエミュレーターが受け取り計算したヘッダーを確認できる。既定では無効（`404` を返す）。 |
 | `SKIP_AUTH_ROUTES` | | — | 認証をスキップしてアップストリームへ直接転送するルート。形式: リクエストパスにマッチする `[METHOD=]REGEX` パターンをカンマ区切りで列挙。例: `GET=^/health$,^/public/`。転送前に認証ヘッダーは除去される。 |
 | `IDP_SELECT_ICONS` | | `simple` | `/.auth/login/select` 画面のアイコンスタイル。`simple` — Simple Icons CDN のロゴ。`generic` — 汎用 ID カードアイコン（完全オフライン対応）。`text` — アイコンなし、テキストのみ。 |
-| `VERBOSE` | | `false` | 起動時に全設定値を出力するか（シークレットはマスク）。`--verbose` / `-v` CLI フラグと同等。 |
+| `VERBOSE` | | `false` | 起動時に全設定値を出力する（シークレットはマスク）ほか、プロトコルレベルの追加診断ログ（リクエストが実際にどのヘッダーで届いたか等）をstderrに出力する。`--verbose` / `-v` CLI フラグと同等。 |
 
 ※ `SAMPLE_APP_PORT` を変更している場合、`APP_UPSTREAM` 未設定時の規定値は `http://localhost:<SAMPLE_APP_PORT>` になります。
 
@@ -130,7 +130,23 @@ Facebook Login はリダイレクト URI に HTTPS を要求します。`TLS_CER
 | --- | :---: | --- | --- |
 | `TLS_CERT_FILE` | | — | TLS サーバー証明書（PEM 形式）のパス。`TLS_KEY_FILE` とともに設定すると、エミュレーターが HTTPS でリクエストを受け付けます。 |
 | `TLS_KEY_FILE` | | — | TLS 秘密鍵（PEM 形式）のパス。`TLS_CERT_FILE` とともに設定すると、エミュレーターが HTTPS でリクエストを受け付けます。 |
-| `SSL_CA_BUNDLE` | | — | カスタム CA 証明書バンドル（PEM 形式）のパス。エミュレーター自身が GitHub へ HTTPS 接続する際（oauth2-proxy のダウンロード）に使用します。通常は不要 — [truststore](https://github.com/sethmlarson/truststore) によって OS の証明書ストア（Windows・macOS・Linux）が自動的に参照されます。社内ネットワークに SSL インスペクション（MITM プロキシ）があり、そのプロキシの CA を OS のストアに追加できない場合（例: Linux でルート権限がない環境）にのみ設定してください。 |
+| `SSL_CA_BUNDLE` | | — | カスタム CA 証明書バンドル（PEM 形式）のパス。エミュレーター自身が HTTPS 接続する際（GitHubへのoauth2-proxyダウンロード、および`APP_UPSTREAM`が`https://`の場合）に使用します。通常は不要 — [truststore](https://github.com/sethmlarson/truststore) によって OS の証明書ストア（Windows・macOS・Linux）が自動的に参照されます（mkcert等のローカル開発用証明書も、そのCAをOSストアにインストール済みであれば検証できます）。社内ネットワークに SSL インスペクション（MITM プロキシ）があり、そのプロキシの CA を OS のストアに追加できない場合（例: Linux でルート権限がない環境）にのみ設定してください。 |
+| `HTTP20_ENABLED` | | `false` | `SITE_PORT`上でHTTP/1.1に加えてHTTP/2も受け付けるか（併用であり排他ではない。Azure App Serviceの「HTTPバージョン: 2.0」と同じ考え方）。詳細は後述の[HTTP/2とgRPC](#http2とgrpc)を参照。 |
+| `HTTP20_PROXY_MODE` | | `disabled` | HTTP/2リクエストを`APP_UPSTREAM`への中継でどこまで維持するか（Azure App Serviceの`http20ProxyFlag`に相当）。`disabled`は全部HTTP/1.1に変換（gRPCが壊れる）、`all`は全部HTTP/2のまま中継（`APP_UPSTREAM`がHTTP/2を話せる必要がある）、`grpc-only`は`Content-Type`が`application/grpc*`のリクエストだけHTTP/2のまま中継。`HTTP20_ENABLED`が有効なときのみ効果を持つ。無効な場合`SITE_PORT`はそもそもHTTP/2リクエストを受け付けないため、この設定に関わらず全部HTTP/1.1で中継される。 |
+| `APPSERVICE_HTTP20_ONLY_PORT` | | — | Azure App Serviceの`HTTP20_ONLY_PORT`アプリ設定に相当(Azure Container Appsには対応する概念がなく、未設定のままでよい)。上記`HTTP20_PROXY_MODE`によって`APP_UPSTREAM`へHTTP/2で中継される場合、`APP_UPSTREAM`のポートではなく、`APP_UPSTREAM`と同じホストのこのポートへ送られる。詳細は後述の[HTTP/2とgRPC](#http2とgrpc)を参照。 |
+
+
+
+
+
+
+
+
+
+
+
+
+| `WEB_SOCKETS_ENABLED` | | `true` | WebSocket（HTTP/1.1の従来の`Upgrade`とHTTP/2のRFC 8441拡張`CONNECT`の両方）を中継するかどうか。Azure App Serviceの「Web sockets」On/Offスイッチに相当する。App ServiceではLinuxは常に実質On固定で、Windowsのみ実際にOffへ切り替えられる。Windows App Serviceで「Web sockets」をOffにした状態に合わせたい場合に`false`にする。オフにした場合、WebSocketのブートストラップ要求は特別扱いされず、通常のリクエスト/レスポンスとして中継される。 |
 
 #### HTTPS (TLS) を有効にする
 
@@ -178,6 +194,61 @@ openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
 
 自己署名証明書はブラウザに警告が表示されます。
 
+#### HTTP/2とgRPC
+
+既定では、このゲートウェイは`SITE_PORT`上でHTTP/1.1のみを話します。`HTTP20_ENABLED`と`HTTP20_PROXY_MODE`（上表参照）で追加されるHTTP/2対応は、既存のHTTP/1.1と**併用**であり、排他ではありません。Azure App Serviceの「HTTPバージョン: 2.0」設定と同じ考え方です。
+
+```toml
+HTTP20_ENABLED = true            # SITE_PORT上でHTTP/1.1と併せてHTTP/2も受け付ける
+HTTP20_PROXY_MODE = "grpc-only"  # "disabled" | "all" | "grpc-only"
+```
+
+`HTTP20_PROXY_MODE`は、HTTP/2リクエストを`APP_UPSTREAM`への中継でどこまで維持するかを制御します。Azure App Serviceの`http20ProxyFlag`に相当します。
+
+- **`disabled`**（既定）: `APP_UPSTREAM`への全リクエストをHTTP/1.1で送信します（クライアントがHTTP/2を使っていても同様）。通常のリクエスト/レスポンス型通信には問題ありませんが、gRPCは壊れます。ストリーミングやtrailerでのステータス通知（`grpc-status`）はHTTP/1.1では表現できないためです。
+- **`all`**: 全リクエストをHTTP/2のまま`APP_UPSTREAM`に中継します。`APP_UPSTREAM`がそのポートで実際にHTTP/2を話せる必要があります（平文h2c、またはTLS+ALPN。nginxのようにHTTP/2をTLS上でしか話さない相手でも、`APP_UPSTREAM`を`https://`にすれば動作します）。
+- **`grpc-only`**: `Content-Type`が`application/grpc`で始まるリクエストだけHTTP/2のまま中継し、他は`disabled`と同様にHTTP/1.1に変換します。`APP_UPSTREAM`が同じポートでgRPCサービスと通常のHTTPエンドポイントの両方を提供している場合に使用します。
+
+補足:
+
+- クライアント側のHTTP/2受け入れは、平文（h2c）と、`TLS_CERT_FILE`/`TLS_KEY_FILE`設定時のTLS+ALPNネゴシエーションの両方に対応しています。実際のブラウザ（TLS経由でのみHTTP/2を交渉）と同じ挙動です。
+- `APP_UPSTREAM`は`https://`でも指定できます。`HTTP20_PROXY_MODE = "disabled"`（TLS上でHTTP/1.1として中継）と`"all"`/`"grpc-only"`（TLS+ALPNでHTTP/2として中継。`h2`がネゴシエートされない場合は失敗）の両方で対応します。証明書検証は`SSL_CA_BUNDLE`が設定されていればそれを、なければOSの証明書ストアを使用します。mkcert等で発行したローカル開発用証明書も、そのCAをOSストアにインストール済みであれば追加設定なしで検証できます。
+- App Serviceの`HTTP20_ONLY_PORT`(HTTP/2で中継するトラフィックの転送先として、アップストリームアプリが持つ別リスナー)を模すには`APPSERVICE_HTTP20_ONLY_PORT`を設定してください（後述の「Azure App Serviceを模す場合の設定」参照）。
+- `APP_UPSTREAM`への中継は、HTTP/1.1・HTTP/2どちらの経路も、リクエスト・レスポンスいずれのボディも全部バッファリングしてからではなく届いた分から順に流します。これにより`HTTP20_PROXY_MODE`の値に関わらずSSE等のストリーミングエンドポイントが動作し、HTTP/2ではクライアントストリーミング・双方向ストリーミングのgRPC呼び出し(サーバーリフレクション含む)も動作します。
+
+##### Azure Container Appsを模す場合の設定
+
+Azure Container Appsのingressは`transport`という単一の設定（`auto`/`http`/`http2`/`tcp`）で、クライアント側・アップストリーム側の両方のプロトコルを一度に決めます。本エミュレーターはこれを2つの設定に分けているため、`transport`の値ごとの対応は次の通りです。
+
+| Container Apps `ingress.transport` | エミュレーターの設定 |
+| --- | --- |
+| `http`（HTTP/1.1のみ） | `HTTP20_ENABLED = false` |
+| `http2`（HTTP/2のみ、全リクエスト） | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "all"` |
+| `auto`（ドキュメント上は「HTTP/1・HTTP/2を自動判定」とされている） | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "grpc-only"` |
+
+なお、gRPCが`SITE_PORT`を他の全てと共有する点は既にContainer Appsの単一ingress方式と同じで、App Serviceのように別ポートを用意する必要はありません。
+
+**本物のContainer Appsの`auto`は今のところこの通りには動かないという情報もあります。**
+ドキュメントは`auto`を「コネクション単位でHTTP/1・HTTP/2を自動判定する」と説明していますが、
+[microsoft/azure-container-apps#562](https://github.com/microsoft/azure-container-apps/issues/562)
+には、`auto`が`http`(HTTP/1.1専用のアップストリーム)と同じ動作しかせずgRPCが届かないという
+報告が、2023年から2026年3月の直近コメントまで複数の利用者から挙がっており、Microsoftの
+エンジニアによる「`auto`は実質`http`と同じ」というコメントも付いています。
+1つのアプリで`auto`によりgRPCとWebSocket/通常のHTTPを共存させるつもりなら、上記の
+ドキュメント通りの挙動を前提にせず、上記issueを確認した上で自分のデプロイでも検証することを
+おすすめします。
+
+##### Azure App Serviceを模す場合の設定
+
+App Serviceは、gRPC用にアップストリームアプリが別のリスナー(`HTTP20_ONLY_PORT`アプリ設定で指定するポート)を持つことを要求します。通常のHTTP/1.1ポートとは別です。これを模すには、`APPSERVICE_HTTP20_ONLY_PORT`に、そのgRPC/HTTP-2専用リスナーが実際にbindしているポート(`APP_UPSTREAM`と同じホスト)を設定してください。
+
+```toml
+HTTP20_ENABLED = true
+HTTP20_PROXY_MODE = "grpc-only"
+APP_UPSTREAM = "http://localhost:8081"        # アプリの通常のHTTP/1.1ポート
+APPSERVICE_HTTP20_ONLY_PORT = 8082            # アプリ自身の別のgRPCリスナー、同じホスト
+```
+
 ### 動作確認用アプリ設定
 
 動作確認用アプリ（`src/sample_app.py`）の設定です。`SAMPLE_APP_ENABLED = true` を指定した場合のみ起動します。
@@ -211,11 +282,25 @@ openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
 
 ### アプリに到達できない（502 エラー）
 
+考えられる原因の一例として、以下があります。
+
+#### 1. `APP_UPSTREAM` の設定・起動状態
+
 `APP_UPSTREAM` が正しく設定されているか、アプリケーションがその URL で起動しているか確認してください。
+
+#### 2. アップストリームのHTTP/2ヘッダーサイズ制限（`HTTP20_PROXY_MODE = "all"` / `"grpc-only"`）
+
+ログイン成功後のリクエストでのみ発生する場合（毎回ではない）、アップストリームがHTTP/2のヘッダーサイズ制限でリクエストを拒否している可能性があります。oauth2-proxyのセッションクッキーは、アクセストークン/IDトークンを埋め込む設定（`--pass-access-token`/`--set-authorization-header`）により数KBを超えることがあり、nginxなどはHTTP/2リクエストのヘッダーサイズに既定の上限を設けています。エミュレーター自身の出力に以下のようなログが出ていないか確認してください。
+
+```text
+[app] upstream HTTP/2 relay to <host>:<port> (tls=True) failed: ConnectionError('no HTTP/2 response received from ... (upstream reset the stream (error_code=<ErrorCodes.ENHANCE_YOUR_CALM: 11>))')
+```
+
+`APP_UPSTREAM`側のサーバーソフトウェアがnginxの場合は、該当する上限を上げてリロードしてください。`http2_max_field_size`/`http2_max_header_size`（nginx 1.19.7より前）、または`large_client_header_buffers`（1.19.7以降、HTTP/1.xと共通）。あるいは、アップストリームがHTTP/2のまま中継する必要がないなら、`HTTP20_PROXY_MODE`を`"disabled"`（特定のgRPCルートだけ必要なら`"grpc-only"`）に変更してください。
 
 ### oauth2-proxy が HTTP 500 を返す
 
-いくつかの原因が考えられます。
+考えられる原因の一例として、以下があります。
 
 #### 1. クライアントシークレットが間違っている
 

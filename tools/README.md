@@ -65,3 +65,15 @@ IDP_APPLE_CLIENT_SECRET = "<contents of client_secret.jwt>"
 ### Expiration
 
 The generated JWT is valid for **180 days** (the maximum allowed by Apple). Regenerate it before it expires and update `IDP_<NAME>_CLIENT_SECRET` in `config.toml` with the new JWT.
+
+---
+
+## azure-poc/
+
+Throwaway apps meant to be deployed to a real Azure App Service instance, to verify actual
+behavior that can't be confirmed from automated tests (e.g. RFC 8441, gRPC's relationship
+with Easy Auth). Never referenced from any automated test. See each subdirectory's own
+README for details.
+
+- `azure-grpc-poc/` — verifies whether Easy Auth also protects gRPC (`HTTP20_ONLY_PORT`)
+- `azure-websocket-poc/` — verifies real-world WebSocket-over-HTTP/2 (RFC 8441) behavior

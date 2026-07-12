@@ -8,7 +8,7 @@ This document describes runtime configuration, compatibility boundaries, and tro
 | --- | --- | --- |
 | `--app-upstream URL` | — | Override `APP_UPSTREAM`. Takes priority over `config.toml` and environment variables. Useful for changing the target port without editing the config file. |
 | `--config PATH` | `config.toml` in current directory | Path to the configuration file. |
-| `--verbose`, `-v` | `false` | Print all resolved configuration values on startup with secrets masked. Equivalent to `VERBOSE = true` in `config.toml`. |
+| `--verbose`, `-v` | `false` | Print all resolved configuration values on startup with secrets masked, and enable extra protocol-level diagnostic logging (e.g. exactly what headers a request arrived with) to stderr. Equivalent to `VERBOSE = true` in `config.toml`. |
 
 ## Configuration
 
@@ -24,11 +24,11 @@ Security note:
 | `DEFAULT_IDP` | | — | Default IDP when no session or selection cookie is present. Must be one of the `IDP_LIST` values. See default selection behavior below. |
 | `SITE_URL` | | `http://localhost` | Fallback base URL used when a request carries no `Host` header (without a trailing slash). Usually no change needed. Set an `https://` value only if a TLS-terminating front end (reverse proxy) does not send `X-Forwarded-Proto` — the dev tunnels edge sends it. |
 | `SITE_PORT` | | `8080` | Listen port of this gateway (also the public port when accessed directly). |
-| `APP_UPSTREAM` | | `http://localhost:8081` ※ | URL that authenticated requests are forwarded to. Set to your application's URL when using your own app. |
+| `APP_UPSTREAM` | | `http://localhost:8081` ※ | URL that authenticated requests are forwarded to. Set to your application's URL when using your own app. May be `https://` — see `SSL_CA_BUNDLE` for certificate verification. |
 | `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | Enables the `GET /.debug/headers` diagnostic endpoint. When enabled, that URL shows the headers the emulator receives and computes. Disabled by default — returns `404`. |
 | `SKIP_AUTH_ROUTES` | | — | Routes that bypass authentication and are forwarded directly to the upstream. Format: comma-separated list of `[METHOD=]REGEX` patterns matched against the request path. Example: `GET=^/health$,^/public/`. Injected auth headers are stripped before forwarding. |
 | `IDP_SELECT_ICONS` | | `simple` | Icon style for the `/.auth/login/select` page. `simple` — Simple Icons CDN logo. `generic` — generic ID card icon (fully offline). `text` — no icon, text labels only. |
-| `VERBOSE` | | `false` | Print all resolved configuration values on startup with secrets masked. Equivalent to passing `--verbose` / `-v` on the command line. |
+| `VERBOSE` | | `false` | Print all resolved configuration values on startup with secrets masked, and enable extra protocol-level diagnostic logging (e.g. exactly what headers a request arrived with) to stderr. Equivalent to passing `--verbose` / `-v` on the command line. |
 
 ※ If `SAMPLE_APP_PORT` is changed, the default becomes `http://localhost:<SAMPLE_APP_PORT>` when `APP_UPSTREAM` is not set.
 
@@ -130,7 +130,11 @@ Version management behavior:
 | --- | :---: | --- | --- |
 | `TLS_CERT_FILE` | | — | Path to the TLS server certificate (PEM format). When set together with `TLS_KEY_FILE`, the emulator accepts inbound requests over HTTPS. |
 | `TLS_KEY_FILE` | | — | Path to the TLS private key (PEM format). When set together with `TLS_CERT_FILE`, the emulator accepts inbound requests over HTTPS. |
-| `SSL_CA_BUNDLE` | | — | Path to a custom CA certificate bundle (PEM format). Used for outbound HTTPS connections the emulator makes to GitHub (oauth2-proxy downloads). Normally not needed — the OS certificate store (Windows, macOS, Linux) is used automatically via [truststore](https://github.com/sethmlarson/truststore). Set this only when your network has SSL inspection (MITM proxy) and the proxy CA cannot be added to the OS trust store, for example on Linux without root access. |
+| `SSL_CA_BUNDLE` | | — | Path to a custom CA certificate bundle (PEM format). Used for outbound HTTPS connections the emulator makes: to GitHub (oauth2-proxy downloads), and to `APP_UPSTREAM` when it's `https://`. Normally not needed — the OS certificate store (Windows, macOS, Linux) is used automatically via [truststore](https://github.com/sethmlarson/truststore) (a locally-issued dev cert, e.g. mkcert, verifies once its CA is installed into that store). Set this only when your network has SSL inspection (MITM proxy) and the proxy CA cannot be added to the OS trust store, for example on Linux without root access. |
+| `HTTP20_ENABLED` | | `false` | Accept HTTP/2 on `SITE_PORT`, alongside HTTP/1.1 (additive, not exclusive — mirrors Azure App Service's "HTTP version: 2.0"). See [HTTP/2 and gRPC](#http2-and-grpc) below. |
+| `HTTP20_PROXY_MODE` | | `disabled` | How much of an HTTP/2 request is preserved end to end to `APP_UPSTREAM` (mirrors Azure App Service's `http20ProxyFlag`): `disabled` downgrades everything to HTTP/1.1 (breaks gRPC); `all` relays everything as HTTP/2 (`APP_UPSTREAM` must speak HTTP/2); `grpc-only` relays only requests with a `Content-Type` of `application/grpc*`. Only takes effect while `HTTP20_ENABLED` is on — with it off, `SITE_PORT` never receives an HTTP/2 request to preserve, so everything is relayed as HTTP/1.1 regardless of this setting. |
+| `APPSERVICE_HTTP20_ONLY_PORT` | | — | Mirrors Azure App Service's `HTTP20_ONLY_PORT` app setting (Azure Container Apps has no equivalent concept, so leave this unset for that case). When a request is relayed to `APP_UPSTREAM` over HTTP/2 (per `HTTP20_PROXY_MODE` above), it's sent to this port on `APP_UPSTREAM`'s host instead of `APP_UPSTREAM`'s own port. See [HTTP/2 and gRPC](#http2-and-grpc) below. |
+| `WEB_SOCKETS_ENABLED` | | `true` | Whether WebSocket (both the classic HTTP/1.1 `Upgrade` and the RFC 8441 HTTP/2 extended `CONNECT`) is relayed at all, mirroring Azure App Service's "Web sockets" on/off switch. On Linux App Service, WebSocket is always effectively on regardless of that switch; only Windows App Service can actually turn it off. Set this to `false` to match a Windows App Service instance with "Web sockets" turned off. When off, a WebSocket bootstrap attempt is not treated specially — it falls through to an ordinary proxied request/response instead. |
 
 #### Enabling HTTPS (TLS)
 
@@ -178,6 +182,90 @@ openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
 
 Self-signed certificates cause a browser security warning.
 
+#### HTTP/2 and gRPC
+
+By default the gateway speaks HTTP/1.1 only, on the same `SITE_PORT` used for everything
+else. The HTTP/2 support added by `HTTP20_ENABLED` and `HTTP20_PROXY_MODE` (see the table
+above) is additive to HTTP/1.1 (not exclusive of it) — mirroring how Azure App Service's own
+"HTTP version: 2.0" setting works:
+
+```toml
+HTTP20_ENABLED = true            # accept HTTP/2 on SITE_PORT, alongside HTTP/1.1
+HTTP20_PROXY_MODE = "grpc-only"  # "disabled" | "all" | "grpc-only"
+```
+
+`HTTP20_PROXY_MODE` controls how much of an HTTP/2 request is preserved end to end to
+`APP_UPSTREAM`, mirroring App Service's `http20ProxyFlag`:
+
+- **`disabled`** (default) — every request to `APP_UPSTREAM` is sent as HTTP/1.1, even if
+  the client used HTTP/2. Fine for ordinary request/response traffic; breaks gRPC, whose
+  streaming and trailer-based status (`grpc-status`) cannot be represented over HTTP/1.1.
+- **`all`** — every request is relayed to `APP_UPSTREAM` as HTTP/2. Requires `APP_UPSTREAM`
+  to actually speak HTTP/2 on that port (plaintext h2c, or TLS with ALPN — e.g. nginx, which
+  only ever speaks HTTP/2 over TLS, works when `APP_UPSTREAM` is `https://`).
+- **`grpc-only`** — only requests whose `Content-Type` starts with `application/grpc` are
+  relayed as HTTP/2; everything else is downgraded to HTTP/1.1 as in `disabled`. Use this
+  when `APP_UPSTREAM` serves both a gRPC service and ordinary HTTP endpoints on the same
+  port.
+
+Notes:
+
+- Client-facing HTTP/2 accepts both plaintext (h2c) and, when `TLS_CERT_FILE`/`TLS_KEY_FILE`
+  are set, TLS with ALPN negotiation — matching how real browsers speak HTTP/2 (TLS-only).
+- `APP_UPSTREAM` may be `https://`, for both `HTTP20_PROXY_MODE = "disabled"` (relayed as
+  HTTP/1.1 over TLS) and `"all"`/`"grpc-only"` (relayed as HTTP/2 over TLS with ALPN,
+  failing if the upstream doesn't negotiate `h2`). Certificate verification uses
+  `SSL_CA_BUNDLE` if set, otherwise the OS trust store — so a locally-issued dev cert (e.g.
+  mkcert) verifies once its CA is installed into the OS store, with no extra configuration.
+- To emulate App Service's `HTTP20_ONLY_PORT` (a second port the upstream app itself
+  listens on for HTTP/2-relayed traffic), set `APPSERVICE_HTTP20_ONLY_PORT` (see
+  "Configuring for Azure App Service" below).
+- Both relay paths to `APP_UPSTREAM` (HTTP/1.1 and HTTP/2) forward both the request and
+  response body as they arrive rather than buffering them in memory first — this is what
+  lets a streaming endpoint (SSE, etc.) work under any `HTTP20_PROXY_MODE`, and what makes
+  client-streaming and bidirectional-streaming gRPC calls (server reflection included)
+  work over the HTTP/2 relay path.
+
+##### Configuring for Azure Container Apps
+
+Azure Container Apps ingress uses a single `transport` setting (`auto` / `http` / `http2` /
+`tcp`) that decides both the client-facing and upstream-facing protocol at once. This
+emulator splits that into two settings instead, so here's how `transport` values map onto
+them:
+
+| Container Apps `ingress.transport` | Emulator settings |
+| --- | --- |
+| `http` (HTTP/1.1 only) | `HTTP20_ENABLED = false` |
+| `http2` (HTTP/2 only, every request) | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "all"` |
+| `auto` (documented as "detect HTTP/1 or HTTP/2 automatically") | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "grpc-only"` |
+
+Also note gRPC already shares `SITE_PORT` with everything else here, same as Container
+Apps' single-ingress model. No separate port to configure, unlike App Service.
+
+**There are reports that `auto` doesn't actually do this on real Container Apps today.**
+Despite the docs describing `auto` as automatic per-connection HTTP/1-or-HTTP/2 detection,
+[microsoft/azure-container-apps#562](https://github.com/microsoft/azure-container-apps/issues/562)
+describes `auto` behaving identically to `http` (HTTP/1.1-only upstream, gRPC not
+reaching the app), reproduced by independent reporters from 2023 through a comment as
+recent as March 2026, including a Microsoft engineer's comment that `auto` effectively
+just means `http`. If you're relying on `auto` to
+serve both gRPC and WebSocket/plain HTTP from one app, it's worth reading that issue and
+verifying your own deployment rather than assuming the documented behavior holds.
+
+##### Configuring for Azure App Service
+
+App Service requires the upstream app to have a second listener for gRPC, on a port given by
+the `HTTP20_ONLY_PORT` app setting — separate from the app's regular HTTP/1.1 port. To emulate
+this, set `APPSERVICE_HTTP20_ONLY_PORT` to the port your upstream app's own gRPC/HTTP-2-only
+listener is bound to (on the same host as `APP_UPSTREAM`):
+
+```toml
+HTTP20_ENABLED = true
+HTTP20_PROXY_MODE = "grpc-only"
+APP_UPSTREAM = "http://localhost:8081"        # the app's regular HTTP/1.1 port
+APPSERVICE_HTTP20_ONLY_PORT = 8082            # the app's separate gRPC listener, same host
+```
+
 ### Verification App Settings
 
 Settings for the optional verification app (`src/sample_app.py`). The app starts only when `SAMPLE_APP_ENABLED = true`.
@@ -211,7 +299,30 @@ For example: `http://localhost:8080/oauth2/callback`, or `https://xxx-8080.usw2.
 
 ### App not reachable (502 error)
 
+Several possible causes are listed below.
+
+#### 1. `APP_UPSTREAM` misconfigured or not running
+
 Verify `APP_UPSTREAM` is set correctly and your application is running on that address.
+
+#### 2. Upstream HTTP/2 header size limit (`HTTP20_PROXY_MODE = "all"` / `"grpc-only"`)
+
+If this only happens after a successful login (not on every request), the upstream may be
+rejecting the request over HTTP/2 header size limits: oauth2-proxy's session cookie can
+grow past several KB once it embeds the access/ID tokens
+(`--pass-access-token`/`--set-authorization-header`), and servers like nginx cap HTTP/2
+request header sizes by default. Check the emulator's own output for a line like:
+
+```text
+[app] upstream HTTP/2 relay to <host>:<port> (tls=True) failed: ConnectionError('no HTTP/2 response received from ... (upstream reset the stream (error_code=<ErrorCodes.ENHANCE_YOUR_CALM: 11>))')
+```
+
+If the server software behind `APP_UPSTREAM` is nginx, raise the relevant limit and
+reload: `http2_max_field_size` /
+`http2_max_header_size` (nginx before 1.19.7) or `large_client_header_buffers` (1.19.7
+onward, shared with HTTP/1.x). Otherwise, switch to `HTTP20_PROXY_MODE = "disabled"` (or
+`"grpc-only"` if only specific gRPC routes need HTTP/2) if the upstream doesn't actually
+need the rest of the request relayed as HTTP/2.
 
 ### oauth2-proxy returns HTTP 500
 

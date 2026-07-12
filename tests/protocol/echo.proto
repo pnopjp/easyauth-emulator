@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package echo;
+
+// Minimal unary service used to visually confirm whether gRPC calls survive
+// being proxied through the EasyAuth Emulator gateway (see ToDo.md).
+service Echo {
+  rpc SayHello (HelloRequest) returns (HelloReply);
+
+  // Client-streaming: the client sends any number of messages, then a
+  // single reply is returned once it closes its send side.
+  rpc EchoStream (stream HelloRequest) returns (HelloReply);
+
+  // Bidirectional streaming: one reply per request, interleaved as they
+  // arrive rather than only after the client closes its send side — proves
+  // the gateway relays a genuinely open, ongoing stream in both directions.
+  rpc EchoBidi (stream HelloRequest) returns (stream HelloReply);
+}
+
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloReply {
+  string message = 1;
+}

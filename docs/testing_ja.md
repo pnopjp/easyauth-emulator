@@ -34,6 +34,10 @@ push v*.*.*
 `src/app.py` の純粋なロジック関数を対象とします。
 サブプロセス・HTTP 通信・外部サービスは一切不要です。
 
+`test_protocol_gaps.py` のみ例外で、ゲートウェイと `tests/protocol/` の検証用アプリを
+サブプロセスとして起動し、実際にHTTP経由でリクエストを送る統合テストです（詳細は下記
+「プロトコル欠落の回帰テスト」を参照）。
+
 ### テスト対象
 
 #### グループ A — 完全な純粋関数（環境依存なし）
@@ -58,6 +62,45 @@ push v*.*.*
 | `_idp_user_id_claim(idp)` | `src/app.py:217` | `entra` → `"preferred_username"`；`google` → `"email"`；`IDP_ENTRA_AUTH_USER_ID_CLAIM` でオーバーライド可能 |
 | `_idp_logout_endpoint(idp)` | `src/app.py:237` | 環境変数で明示指定された場合はそれを使用；`microsoft` kind かつ issuer が `/v2.0` 終端 → URL 自動導出；その他の kind → `""` |
 | `_build_provider_logout_url(idp, post_logout_redirect_uri)` | `src/app.py:249` | エンドポイント未設定 → `""`；相対リダイレクト URI は SITE\_URL + SITE\_PORT で絶対 URL 化；エンドポイントの既存クエリパラメータは保持される |
+
+### プロトコル欠落の回帰テスト（`test_protocol_gaps.py`）
+
+**依存パッケージ:** `requirements-test.txt`（`grpcio` 等。`requirements.txt` — 配布バイナリ用 — とは分離）
+
+WebSocket・gRPC・SSE/ストリーミング・chunkedリクエストボディ・`APPSERVICE_HTTP20_ONLY_PORT`
+まわりの挙動を、ゲートウェイ（`src/app.py`）と検証用アプリ（`tests/protocol/app.py`）を実際に
+サブプロセスとして起動して確認します。認証は`SKIP_AUTH_ROUTES`で迂回します — 認証済み
+経由でも迂回経由でも`_proxy_to`の呼び出しは同一コードパスのため、代替として妥当です。
+
+WebSocket・SSE・chunkedリクエストボディの欠落はすべて解消済みで、`xfail`マーカーの付いた
+テストは現状ありません。すべて「正しく動く」ことをそのままアサートします。
+
+| テスト | 対象 |
+| --- | --- |
+| `test_websocket_upgrade_and_echo_through_gateway` | HTTP/1.1クライアントのUpgradeハンドシェイクの中継とエコーメッセージの往復 |
+| `test_websocket_upgrade_over_http2_rfc8441_through_gateway` | HTTP/2クライアントのRFC 8441拡張CONNECTの中継とエコーメッセージの往復（アップストリームへは常にHTTP/1.1 Upgradeとして中継される） |
+| `test_websocket_over_http2_rfc8441_without_sec_websocket_key` | `Sec-WebSocket-Key`を送らない拡張CONNECT（実ブラウザの挙動）でも、ゲートウェイが合成して中継し成功するか |
+| `test_websocket_disabled_falls_back_to_ordinary_proxy_over_http1` | `WEB_SOCKETS_ENABLED=false`のとき、HTTP/1.1のUpgrade要求が特別扱いされず通常のリクエストとして中継されるか |
+| `test_websocket_disabled_does_not_advertise_connect_protocol_over_http2` | `WEB_SOCKETS_ENABLED=false`のとき、`SETTINGS_ENABLE_CONNECT_PROTOCOL`を広告しないか |
+| `test_protocol_app_accepts_direct_http2` | 検証用アプリ(`tests/protocol/app.py`)が平文のHTTP/2(h2c)を直接受け付けるか |
+| `test_http20_proxy_mode_all_reaches_protocol_app_over_http2` | `HTTP20_PROXY_MODE=all`で、ゲートウェイの本物のHTTP/2中継が検証用アプリに届き502にならないか |
+| `test_sse_streamed_incrementally_through_gateway` | イベントがバッファリングされず1つずつ逐次届くか |
+| `test_chunked_request_body_forwarded_through_gateway` | `send_chunked.py`で複数チャンク送信し、本文が欠落しないか |
+| `test_chunked_request_body_streamed_incrementally_to_upstream` | チャンク間に間隔をあけて送信した場合、`APP_UPSTREAM`側に全部バッファリングされてからではなく複数回に分けて届くか |
+| `test_grpc_disabled_by_default_does_not_hang` | `HTTP20_ENABLED`既定オフのゲートウェイで、gRPC呼び出しがハングせず速やかに失敗するか |
+| `test_grpc_call_through_gateway` | `HTTP20_ENABLED`/`HTTP20_PROXY_MODE=grpc-only`設定で単項RPCが成功するか（`grpcio`未インストール時は自動skip） |
+| `test_grpc_client_streaming_through_gateway` | クライアントストリーミングRPC(複数メッセージ送信後にクローズ)が中継され、正しく応答が返るか |
+| `test_grpc_bidi_streaming_through_gateway` | 双方向ストリーミングRPCで、クライアントの送信完了を待たず各メッセージに順次応答が返るか |
+| `test_grpc_server_reflection_through_gateway` | サーバーリフレクション(それ自体が双方向ストリーミングRPC)がゲートウェイ経由でハングせず成功するか |
+| `test_grpc_client_streaming_abort_mid_body_does_not_wedge_gateway` | クライアントストリーミング送信中にキャンセルしても、ゲートウェイがハングせず後続の呼び出しに影響しないか |
+| `test_http20_disabled_forces_http1_upstream_even_when_proxy_mode_is_all` | `HTTP20_ENABLED=false`のとき、`HTTP20_PROXY_MODE=all`でもHTTP/1.1で中継されるか |
+| `test_appservice_http20_only_port_relays_grpc_to_separate_upstream_port` | クライアント向けの単一`SITE_PORT`経由で、実際のgRPC呼び出しが`APP_UPSTREAM`自身のポートではなく`APPSERVICE_HTTP20_ONLY_PORT`へ中継されるか(実機App Serviceで確認済みの構成) |
+| `test_unauthenticated_grpc_with_http20_only_port_fails_fast` | `APPSERVICE_HTTP20_ONLY_PORT`設定時、未認証gRPC呼び出しがハングせず速やかに失敗するか |
+| `test_grpc_content_routes_to_http20_only_port_not_app_upstream` | gRPCと判定されたリクエストが`APPSERVICE_HTTP20_ONLY_PORT`へ届き、`APP_UPSTREAM`自身のポートには届かないか |
+| `test_ordinary_request_still_routes_to_app_upstream_with_http20_only_port_set` | `APPSERVICE_HTTP20_ONLY_PORT`設定時でも、gRPC以外のリクエストは`APP_UPSTREAM`自身のポートへ届くか |
+| `test_all_mode_routes_ordinary_request_to_http20_only_port_too` | `HTTP20_PROXY_MODE=all`のとき、gRPC以外のリクエストも`APPSERVICE_HTTP20_ONLY_PORT`へ届くか |
+
+手動での確認手順・実機確認済みの現状挙動は `tests/protocol/README_ja.md` を参照してください。
 
 ---
 
@@ -119,7 +162,7 @@ private メソッドは `(instance as any).method(...)` 経由でアクセスし
 | レイヤー | 内容 | 優先度 |
 | --- | --- | --- |
 | VS Code 拡張機能 統合テスト（拡充） | `EmulatorManager` 状態遷移・`PortDetector.detect()` フロー全体（基本的な起動・コマンド登録テストは実装済み） | `vscode.workspace` や `fs` に依存するため追加のセットアップが必要 |
-| E2E / HTTP 統合テスト | ゲートウェイを起動してリクエストを送り、レスポンスヘッダーをアサート | モック oauth2-proxy または実際の IDP クレデンシャルが必要 |
+| E2E / HTTP 統合テスト（認証ヘッダーのアサート） | ゲートウェイを起動してリクエストを送り、`X-MS-CLIENT-PRINCIPAL` 等のレスポンスヘッダーをアサート（プロトコル欠落の確認は `test_protocol_gaps.py` で実装済み） | モック oauth2-proxy または実際の IDP クレデンシャルが必要 |
 | 設定バリデーションテスト | 不正な `config.toml` を渡してエラーハンドリングを検証 | 優先度低（既存の TOML パースでほぼカバー済み） |
 
 ---
@@ -129,8 +172,8 @@ private メソッドは `(instance as any).method(...)` 経由でアクセスし
 ### Python
 
 ```bash
-# テスト依存パッケージのインストール
-pip install pytest
+# テスト依存パッケージのインストール(pytest + grpcio等)
+pip install -r requirements-test.txt
 
 # Python 単体テストをすべて実行
 pytest tests/python/ -v
