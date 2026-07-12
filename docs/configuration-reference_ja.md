@@ -134,6 +134,18 @@ Facebook Login はリダイレクト URI に HTTPS を要求します。`TLS_CER
 | `HTTP20_ENABLED` | | `false` | `SITE_PORT`上でHTTP/1.1に加えてHTTP/2も受け付けるか（併用であり排他ではない。Azure App Serviceの「HTTPバージョン: 2.0」と同じ考え方）。詳細は後述の[HTTP/2とgRPC](#http2とgrpc)を参照。 |
 | `HTTP20_PROXY_MODE` | | `disabled` | HTTP/2リクエストを`APP_UPSTREAM`への中継でどこまで維持するか（Azure App Serviceの`http20ProxyFlag`に相当）。`disabled`は全部HTTP/1.1に変換（gRPCが壊れる）、`all`は全部HTTP/2のまま中継（`APP_UPSTREAM`がHTTP/2を話せる必要がある）、`grpc-only`は`Content-Type`が`application/grpc*`のリクエストだけHTTP/2のまま中継。`HTTP20_ENABLED`が有効なときのみ効果を持つ。無効な場合`SITE_PORT`はそもそもHTTP/2リクエストを受け付けないため、この設定に関わらず全部HTTP/1.1で中継される。 |
 | `APPSERVICE_HTTP20_ONLY_PORT` | | — | Azure App Serviceの`HTTP20_ONLY_PORT`アプリ設定に相当(Azure Container Appsには対応する概念がなく、未設定のままでよい)。上記`HTTP20_PROXY_MODE`によって`APP_UPSTREAM`へHTTP/2で中継される場合、`APP_UPSTREAM`のポートではなく、`APP_UPSTREAM`と同じホストのこのポートへ送られる。詳細は後述の[HTTP/2とgRPC](#http2とgrpc)を参照。 |
+
+
+
+
+
+
+
+
+
+
+
+
 | `WEB_SOCKETS_ENABLED` | | `true` | WebSocket（HTTP/1.1の従来の`Upgrade`とHTTP/2のRFC 8441拡張`CONNECT`の両方）を中継するかどうか。Azure App Serviceの「Web sockets」On/Offスイッチに相当する。App ServiceではLinuxは常に実質On固定で、Windowsのみ実際にOffへ切り替えられる。Windows App Serviceで「Web sockets」をOffにした状態に合わせたい場合に`false`にする。オフにした場合、WebSocketのブートストラップ要求は特別扱いされず、通常のリクエスト/レスポンスとして中継される。 |
 
 #### HTTPS (TLS) を有効にする
@@ -202,7 +214,7 @@ HTTP20_PROXY_MODE = "grpc-only"  # "disabled" | "all" | "grpc-only"
 - クライアント側のHTTP/2受け入れは、平文（h2c）と、`TLS_CERT_FILE`/`TLS_KEY_FILE`設定時のTLS+ALPNネゴシエーションの両方に対応しています。実際のブラウザ（TLS経由でのみHTTP/2を交渉）と同じ挙動です。
 - `APP_UPSTREAM`は`https://`でも指定できます。`HTTP20_PROXY_MODE = "disabled"`（TLS上でHTTP/1.1として中継）と`"all"`/`"grpc-only"`（TLS+ALPNでHTTP/2として中継。`h2`がネゴシエートされない場合は失敗）の両方で対応します。証明書検証は`SSL_CA_BUNDLE`が設定されていればそれを、なければOSの証明書ストアを使用します。mkcert等で発行したローカル開発用証明書も、そのCAをOSストアにインストール済みであれば追加設定なしで検証できます。
 - App Serviceの`HTTP20_ONLY_PORT`(HTTP/2で中継するトラフィックの転送先として、アップストリームアプリが持つ別リスナー)を模すには`APPSERVICE_HTTP20_ONLY_PORT`を設定してください（後述の「Azure App Serviceを模す場合の設定」参照）。
-- `APP_UPSTREAM`への中継は、HTTP/1.1・HTTP/2どちらの経路も、応答を全部バッファリングしてからではなく届いた分から順にクライアントへ流します。これにより`HTTP20_PROXY_MODE`の値に関わらずSSE等のストリーミングエンドポイントが動作します。ただしリクエストボディは今も単一のDATAフレームで送信するのみで、汎用的な双方向ストリーミング対応のgRPCクライアントではありません。
+- `APP_UPSTREAM`への中継は、HTTP/1.1・HTTP/2どちらの経路も、リクエスト・レスポンスいずれのボディも全部バッファリングしてからではなく届いた分から順に流します。これにより`HTTP20_PROXY_MODE`の値に関わらずSSE等のストリーミングエンドポイントが動作し、HTTP/2ではクライアントストリーミング・双方向ストリーミングのgRPC呼び出し(サーバーリフレクション含む)も動作します。
 
 ##### Azure Container Appsを模す場合の設定
 
@@ -212,9 +224,19 @@ Azure Container Appsのingressは`transport`という単一の設定（`auto`/`h
 | --- | --- |
 | `http`（HTTP/1.1のみ） | `HTTP20_ENABLED = false` |
 | `http2`（HTTP/2のみ、全リクエスト） | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "all"` |
-| `auto`（コネクション単位で自動判定。gRPCと通常HTTPが混在するアプリでよく使われる） | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "grpc-only"` |
+| `auto`（ドキュメント上は「HTTP/1・HTTP/2を自動判定」とされている） | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "grpc-only"` |
 
 なお、gRPCが`SITE_PORT`を他の全てと共有する点は既にContainer Appsの単一ingress方式と同じで、App Serviceのように別ポートを用意する必要はありません。
+
+**本物のContainer Appsの`auto`は今のところこの通りには動かないという情報もあります。**
+ドキュメントは`auto`を「コネクション単位でHTTP/1・HTTP/2を自動判定する」と説明していますが、
+[microsoft/azure-container-apps#562](https://github.com/microsoft/azure-container-apps/issues/562)
+には、`auto`が`http`(HTTP/1.1専用のアップストリーム)と同じ動作しかせずgRPCが届かないという
+報告が、2023年から2026年3月の直近コメントまで複数の利用者から挙がっており、Microsoftの
+エンジニアによる「`auto`は実質`http`と同じ」というコメントも付いています。
+1つのアプリで`auto`によりgRPCとWebSocket/通常のHTTPを共存させるつもりなら、上記の
+ドキュメント通りの挙動を前提にせず、上記issueを確認した上で自分のデプロイでも検証することを
+おすすめします。
 
 ##### Azure App Serviceを模す場合の設定
 

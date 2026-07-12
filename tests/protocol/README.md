@@ -52,9 +52,10 @@ Open `http://localhost:8082/` and try the WebSocket and SSE sections — both sh
 separate app running).
 
 The chunked-body section has no browser button: Chrome/Edge require HTTP/2 or HTTP/3 for
-streaming `fetch` request bodies and throw `net::ERR_H2_OR_QUIC_REQUIRED` against an
-HTTP/1.1 server, and this app (like the gateway) only speaks HTTP/1.1. Use the curl
-command shown on the page instead:
+streaming `fetch` request bodies and throw `net::ERR_H2_OR_QUIC_REQUIRED` otherwise, and
+browsers only ever negotiate HTTP/2 via TLS — never over plaintext, even though this app
+also accepts plaintext HTTP/2 (h2c; see below). Use the curl command shown on the page
+instead:
 
 ```bash
 curl -X POST --no-buffer -H "Transfer-Encoding: chunked" --data-binary "chunked request body test" http://localhost:8082/chunked/echo
@@ -99,17 +100,22 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
 
    - **WebSocket** — works correctly, from a client speaking either HTTP/1.1 (this app's
      page is loaded and tested that way by default) or HTTP/2 (RFC 8441 extended
-     `CONNECT`). Either way, the gateway relays to `APP_UPSTREAM` (this app, which only
-     ever speaks HTTP/1.1 itself) as a classic `Upgrade` handshake, then shuttles raw
-     bytes bidirectionally between the client and upstream until either side closes — not
-     aware of WebSocket framing at all, so it works with any WebSocket application, not
-     just this one. Real Azure App Service does the same conversion regardless of
-     `HTTP20_PROXY_MODE` — see `tests/protocol/azure-websocket-poc` for details.
+     `CONNECT`). Either way, the gateway relays to `APP_UPSTREAM` as a classic `Upgrade`
+     handshake, then shuttles raw bytes bidirectionally between the client and upstream
+     until either side closes — not aware of WebSocket framing at all, so it works with
+     any WebSocket application, not just this one. Real Azure App Service does the same
+     conversion regardless of `HTTP20_PROXY_MODE` — see `tools/azure-poc/azure-websocket-poc`
+     for details. This app doesn't implement RFC 8441 itself, matching real Azure App
+     Service backends, which never need to either.
    - **SSE** — works correctly. Events are relayed as they arrive rather than being
      buffered until the upstream response completes (both `_proxy_to`'s HTTP/1.1 relay
      and `_http2_relay_request`'s HTTP/2 relay under `HTTP20_PROXY_MODE=all` support this).
    - **Chunked body** — works correctly. The `Transfer-Encoding: chunked` body is decoded
-     before being relayed, and `received_bytes` matches the length of the sent body.
+     and forwarded to `APP_UPSTREAM` as each chunk arrives, rather than being buffered in
+     full first, and `received_bytes` matches the length of the sent body.
+   - **HTTP/2 (`HTTP20_PROXY_MODE=all`)** — works correctly. This app also accepts
+     plaintext HTTP/2 (h2c) alongside HTTP/1.1, so the gateway's genuine HTTP/2 relay
+     under `all` (or `grpc-only` for non-gRPC content) no longer 502s against it.
    - **gRPC** — running the same `grpcurl`/gRPC client against the gateway's `SITE_PORT`
      instead of 8083 fails. The exact symptom depends on the client library, since both
      are surfacing the same root cause (the gateway is HTTP/1.1-only and cannot negotiate
@@ -137,18 +143,18 @@ grpcurl -plaintext -d '{"name":"world"}' localhost:8083 echo.Echo/SayHello
        get a plain `401` (+ `WWW-Authenticate: Bearer`, matching real App Service's
        dedicated gRPC port) so the client fails fast with `Unauthenticated` instead of
        hanging until its own call deadline.
-     - **Always pass `-proto` (or `-import-path`)** — without it, `grpcurl` uses server
-       reflection to look up the method, and reflection is a bidirectional-streaming RPC.
-       The gateway's HTTP/2 handling (both inbound and its relay to `APP_UPSTREAM`) is
-       unary request/response only (see the notes in the configuration reference's
-       "HTTP/2 and gRPC" section), so a reflection call just hangs — it never sees the
-       response, since the gateway never even dispatches the request until the client's
-       stream ends, and grpcurl's reflection client doesn't close its send side. Bypassing
-       reflection with `-proto` avoids this entirely:
-
-       ```bash
-       grpcurl -plaintext -proto tests/protocol/echo.proto -d '{"name":"world"}' localhost:<port> echo.Echo/SayHello
-       ```
+     - **Server reflection works, so `-proto` is optional.** `grpcurl -plaintext
+       localhost:<port> list` (no `-proto`) resolves the service list through the
+       gateway, and `echo.Echo/SayHello` can be invoked without a local proto file too —
+       both client-streaming and bidirectional-streaming RPCs (reflection included) are
+       relayed correctly, since the gateway dispatches a request as soon as it starts
+       rather than waiting for the client's stream to end. Real Azure App Service's
+       gRPC listener does *not* support this once authenticated — server reflection
+       itself fails with a platform-side error (see the "Result" section in
+       `tools/azure-poc/azure-grpc-poc/README.md`) — and this gap is deliberately not
+       reproduced here, since real gRPC clients normally use a compiled stub from a
+       `.proto` file rather than depending on reflection at runtime; the divergence only
+       matters for manual debugging tools like `grpcurl`.
 
 ## Files
 

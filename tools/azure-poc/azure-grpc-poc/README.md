@@ -53,9 +53,7 @@ grpcurl -d '{"name":"world"}' <app-name>.azurewebsites.net:443 echo.Echo/SayHell
    `x-ms-client-principal-name`, etc. (the HTTP/1.1 equivalents this emulator already
    injects, see `src/app.py`).
 
-## Recording the result
-
-Once you've run both tests, the answer decides the emulator's gRPC architecture:
+## What the result decides
 
 - **Bypasses Easy Auth entirely** → the emulator's gRPC listener can be a simple,
   auth-independent passthrough (Option A from the earlier discussion) — no principal
@@ -66,5 +64,24 @@ Once you've run both tests, the answer decides the emulator's gRPC architecture:
 - **Protected, but no metadata injection (just gated)** → a middle ground: check auth,
   reject if absent, but pure passthrough otherwise.
 
-Record the finding in this repo's memory / `ToDo.md` and delete the Azure resource group
+## Result (confirmed 2026-07-12)
+
+| # | Question | Answer |
+| --- | --- | --- |
+| 1 | Does an unauthenticated gRPC call reach the app? | No — Easy Auth intercepts it and returns `401 Unauthorized` immediately (confirmed via `grpcurl`, no hang) |
+| 2 | Does an authenticated call get principal metadata injected? | Yes — the exact same header set this emulator already injects on HTTP/1.1 (see `_AUTH_HEADERS_TO_STRIP` in `src/app.py`) shows up as gRPC metadata: `x-ms-client-principal-name`, `x-ms-client-principal-id`, `x-ms-client-principal-idp`, `x-ms-client-principal`, `x-ms-token-aad-access-token`, `x-ms-token-aad-id-token` |
+| 3 | Does gRPC server reflection work over the authenticated real path? | No — with a valid `AppServiceAuthSession` cookie, `grpcurl` without `-proto` (which uses reflection, itself a bidirectional-streaming RPC) fails with `400`/`502` and the request never even reaches the app container (confirmed via container log tailing). Passing `-proto echo.proto` to bypass reflection works fine |
+
+**Conclusion**: real Azure App Service Easy Auth **does** protect the gRPC (`HTTP20_ONLY_PORT`)
+listener, and **does** inject the same principal/token metadata it injects as HTTP/1.1 headers
+— this is "Option B" from the list above. Server reflection specifically seems to hit a real
+platform-side limitation when authenticated, independent of the metadata-injection question;
+this doesn't block using reflection for manual `grpcurl` exploration while unauthenticated (or
+against the emulator itself, which handles reflection fine per
+`tests/python/test_protocol_gaps.py::test_grpc_server_reflection_through_gateway`) but is worth
+keeping in mind if a real client's discovery step depends on reflection specifically.
+
+## Cleanup
+
+The results above are already recorded in this README. Delete the Azure resource group
 afterward to stop billing.

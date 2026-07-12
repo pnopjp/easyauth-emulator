@@ -29,11 +29,6 @@ HTTP/2 for everything else. This is a genuine fidelity gap versus this emulator,
 and `project_proxy_streaming_and_websocket.md` in this project's memory for the full
 implication for the emulator's design).
 
-This differs from Azure Container Apps, which has an unrelated, already-confirmed real
-constraint (`ingress.transport: http2`/`auto` breaks WebSocket entirely, per
-`microsoft/azure-container-apps` issues #280/#562) — Container Apps fidelity is
-unaffected by this finding.
-
 ## Deploy
 
 1. Create a Linux Web App (Python 3.12 runtime), any tier that supports custom startup
@@ -107,8 +102,8 @@ and the script prints the echoed WebSocket frame (`echo: hello`).
 4. Set `http20ProxyFlag` back to `0` afterward (`az webapp config set
    --generic-configurations '{"http20ProxyFlag": 0}'`).
 
-## Recording the result
+## Cleanup
 
-Record the finding in this repo's memory / `ToDo.md`, and delete the Azure resource
+The results above are already recorded in this README. Delete the Azure resource
 group afterward to stop billing (or just the Web App if the resource group is shared
 with other things you want to keep).

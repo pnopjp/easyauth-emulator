@@ -220,11 +220,11 @@ Notes:
 - To emulate App Service's `HTTP20_ONLY_PORT` (a second port the upstream app itself
   listens on for HTTP/2-relayed traffic), set `APPSERVICE_HTTP20_ONLY_PORT` (see
   "Configuring for Azure App Service" below).
-- Both relay paths to `APP_UPSTREAM` (HTTP/1.1 and HTTP/2) forward the response as it
-  arrives rather than buffering it in memory first — this is what lets a streaming
-  endpoint (SSE, etc.) work under any `HTTP20_PROXY_MODE`. The request body, though, is
-  still sent as a single DATA frame either way — not a general bidirectional-streaming
-  gRPC client.
+- Both relay paths to `APP_UPSTREAM` (HTTP/1.1 and HTTP/2) forward both the request and
+  response body as they arrive rather than buffering them in memory first — this is what
+  lets a streaming endpoint (SSE, etc.) work under any `HTTP20_PROXY_MODE`, and what makes
+  client-streaming and bidirectional-streaming gRPC calls (server reflection included)
+  work over the HTTP/2 relay path.
 
 ##### Configuring for Azure Container Apps
 
@@ -237,10 +237,20 @@ them:
 | --- | --- |
 | `http` (HTTP/1.1 only) | `HTTP20_ENABLED = false` |
 | `http2` (HTTP/2 only, every request) | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "all"` |
-| `auto` (negotiated per connection; typical when an app serves gRPC alongside ordinary HTTP) | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "grpc-only"` |
+| `auto` (documented as "detect HTTP/1 or HTTP/2 automatically") | `HTTP20_ENABLED = true`, `HTTP20_PROXY_MODE = "grpc-only"` |
 
 Also note gRPC already shares `SITE_PORT` with everything else here, same as Container
 Apps' single-ingress model. No separate port to configure, unlike App Service.
+
+**There are reports that `auto` doesn't actually do this on real Container Apps today.**
+Despite the docs describing `auto` as automatic per-connection HTTP/1-or-HTTP/2 detection,
+[microsoft/azure-container-apps#562](https://github.com/microsoft/azure-container-apps/issues/562)
+describes `auto` behaving identically to `http` (HTTP/1.1-only upstream, gRPC not
+reaching the app), reproduced by independent reporters from 2023 through a comment as
+recent as March 2026, including a Microsoft engineer's comment that `auto` effectively
+just means `http`. If you're relying on `auto` to
+serve both gRPC and WebSocket/plain HTTP from one app, it's worth reading that issue and
+verifying your own deployment rather than assuming the documented behavior holds.
 
 ##### Configuring for Azure App Service
 

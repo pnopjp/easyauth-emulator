@@ -23,9 +23,11 @@ import binascii
 import datetime as dt
 import hashlib
 import html
+import io
 import json
 import os
 import re
+import socket
 import sys
 import time
 import tomllib
@@ -35,6 +37,11 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
+
+import h2.config
+import h2.connection
+import h2.events
+import h2.exceptions
 
 
 def _parse_config_arg() -> "Path | None":
@@ -140,7 +147,19 @@ _BASE64_LIKE_RE = re.compile(r'^[A-Za-z0-9+/=_-]+$')
 
 
 def _header(headers: dict[str, str], name: str) -> str:
-    return headers.get(name, "")
+    # HTTP header names are case-insensitive (RFC 7230 §3.2), and HTTP/2 in
+    # particular mandates lowercase names on the wire (RFC 7540 §8.1.2) — the
+    # gateway's own HTTP/2 upstream relay already lowercases everything it
+    # sends, so a plain case-sensitive dict.get() against EASYAUTH_HEADER_NAMES'
+    # mixed-case names (e.g. "X-MS-CLIENT-PRINCIPAL") silently misses under
+    # HTTP20_PROXY_MODE="all"/"grpc-only", even though the exact same headers
+    # arrive fine over HTTP/1.1 (which happens to preserve whatever case the
+    # sender used, matching these names by coincidence, not by contract).
+    lname = name.lower()
+    for key, value in headers.items():
+        if key.lower() == lname:
+            return value
+    return ""
 
 
 def _mask_secret(value: str) -> str:
@@ -1034,10 +1053,11 @@ break when proxied.</p>
 
 <section>
   <h2>Chunked request body</h2>
-  <p class="muted">Browsers cannot send a <code>Transfer-Encoding: chunked</code> request body to an HTTP/1.1
-  server: Chrome/Edge require HTTP/2 or HTTP/3 for streaming <code>fetch</code> request bodies and throw
-  <code>net::ERR_H2_OR_QUIC_REQUIRED</code> otherwise, and this app (like the gateway) only speaks HTTP/1.1. Use
-  the curl command from a terminal instead.</p>
+  <p class="muted">Browsers cannot send a <code>Transfer-Encoding: chunked</code> request body over HTTP/1.1:
+  Chrome/Edge require HTTP/2 or HTTP/3 for streaming <code>fetch</code> request bodies and throw
+  <code>net::ERR_H2_OR_QUIC_REQUIRED</code> otherwise, and browsers only ever negotiate HTTP/2 via TLS —
+  never over plaintext, even though this app also accepts plaintext HTTP/2 (h2c). Use the curl command
+  from a terminal instead.</p>
   <pre class="cmd">curl -X POST --no-buffer -H "Transfer-Encoding: chunked" --data-binary "chunked request body test" &lt;base-url&gt;/chunked/echo</pre>
   <p class="muted">Replace <code>&lt;base-url&gt;</code> with <code>{f"http://localhost:{http_port}"}</code> (direct) or the gateway's <code>SITE_URL:SITE_PORT</code> (via proxy).</p>
 </section>
@@ -1215,3 +1235,294 @@ class QuietErrorThreadingHTTPServer(ThreadingHTTPServer):
             print(f"[app] connection from {client_address} reset (peer disconnected)", file=sys.stderr)
             return
         super().handle_error(request, client_address)
+
+
+# ---------------------------------------------------------------------------
+# Plain HTTP/2 (h2c) support, alongside HTTP/1.1
+# ---------------------------------------------------------------------------
+#
+# This lets sample_app.py/tests/protocol/app.py stand in for a real Azure
+# App Service/Container Apps backend under HTTP20_PROXY_MODE="all" (or
+# "grpc-only" for non-gRPC content), which requires APP_UPSTREAM to actually
+# speak HTTP/2 — without it, that gateway relay mode 502s against these demo
+# apps. Deliberately much simpler than src/app.py's own _Http2Connection/
+# _Http2StreamHandler: no proxying, and no genuine bidirectional-streaming
+# endpoint of its own (WebSocket here is HTTP/1.1 Upgrade-only, matching
+# real Azure App Service — it always downgrades RFC 8441 to a classic
+# Upgrade before the backend ever sees it, confirmed via
+# tools/azure-poc/azure-websocket-poc — so a demo "app" has no real-Azure
+# equivalent to model by understanding RFC 8441 directly). Streams are
+# handled one at a time, synchronously, as each finishes arriving; the
+# gateway's own upstream relay only ever opens one stream per fresh
+# connection anyway, so this has no practical downside for the scenario
+# this exists for. TLS is out of scope too — these apps have no TLS support,
+# so only plaintext h2c (prior knowledge, no Upgrade dance) is relevant.
+
+HTTP2_CONNECTION_PREFACE = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+
+
+def _looks_like_http2_preface(sock: "socket.socket") -> bool:
+    """Peek (without consuming) the start of a connection to tell an h2c
+    client's connection preface apart from an ordinary HTTP/1.1 request
+    line — same technique as src/app.py's own helper of the same name."""
+    try:
+        sock.settimeout(0.5)
+        peeked = sock.recv(len(HTTP2_CONNECTION_PREFACE), socket.MSG_PEEK)
+    except OSError:
+        return False
+    finally:
+        sock.settimeout(None)
+    return len(peeked) > 0 and HTTP2_CONNECTION_PREFACE.startswith(peeked)
+
+
+class _Http2ResponseWriter:
+    """Stands in for a BaseHTTPRequestHandler's self.wfile — each write()
+    becomes its own DATA frame immediately, which is what lets the SSE demo
+    endpoint's per-tick write()+flush() loop deliver genuinely incrementally
+    over HTTP/2 too, not just HTTP/1.1."""
+
+    def __init__(self, send_data) -> None:
+        self._send_data = send_data
+
+    def write(self, data: bytes) -> int:
+        if data:
+            self._send_data(data)
+        return len(data)
+
+    def flush(self) -> None:
+        pass
+
+
+class Http2RequestAdapterMixin:
+    """Mixed in ahead of an existing BaseHTTPRequestHandler subclass (e.g.
+    `class Http2Handler(Http2RequestAdapterMixin, Handler): pass`) so the
+    SAME do_GET/do_POST/_send_json/etc. logic — which only ever touches
+    self.path/self.command/self.headers/self.rfile/self.wfile/
+    send_response/send_header/end_headers — runs unchanged for an HTTP/2
+    stream instead of a real socket-backed HTTP/1.1 connection. Constructed
+    once per stream by _Http2ServingConnection, never via the normal
+    BaseHTTPRequestHandler socketserver flow, so BaseHTTPRequestHandler's own
+    __init__ (which expects a real request socket) is deliberately never
+    called."""
+
+    def __init__(self, command: str, path: str, headers: "dict[str, str]", body: bytes,
+                 send_headers_frame, send_data, end_stream) -> None:
+        self.command = command
+        self.path = path
+        self.headers = headers
+        self.rfile = io.BytesIO(body)
+        self.wfile = _Http2ResponseWriter(send_data)
+        self.close_connection = False  # unused over HTTP/2; kept so existing code that sets it doesn't error
+        self._send_headers_frame = send_headers_frame
+        self._end_stream = end_stream
+        self._status = 200
+        self._response_headers: "list[tuple[str, str]]" = []
+        self._headers_sent = False
+        self._dispatch()
+
+    def _dispatch(self) -> None:
+        handler = getattr(self, f"do_{self.command}", None)
+        try:
+            if handler is None:
+                self.send_response(501)
+                self.end_headers()
+            else:
+                handler()
+        finally:
+            if not self._headers_sent:
+                # A handler that never sent a response (shouldn't happen
+                # with any route today, but don't leave the stream hanging
+                # if one ever does) still needs the stream to end.
+                self.send_response(500)
+                self.end_headers()
+            self._end_stream()
+
+    def send_response(self, code: int, message: "str | None" = None) -> None:
+        self._status = code
+
+    def send_header(self, name: str, value: str) -> None:
+        if name.lower() == "content-length":
+            # HTTP/2 has native DATA framing — a declared Content-Length is
+            # redundant, and dropping it here matches src/app.py's own
+            # send_stream_response for the gateway's HTTP/2 responses.
+            return
+        self._response_headers.append((name, value))
+
+    def end_headers(self) -> None:
+        self._headers_sent = True
+        self._send_headers_frame(self._status, self._response_headers)
+
+
+class _Http2ServingConnection:
+    """Owns one h2c connection's H2Connection state machine for one of
+    these demo apps (not the gateway — see the module-level comment above
+    for why this can be much simpler than src/app.py's own version)."""
+
+    def __init__(self, sock: "socket.socket", handler_cls: type) -> None:
+        self._sock = sock
+        self._handler_cls = handler_cls
+        self._conn = h2.connection.H2Connection(config=h2.config.H2Configuration(client_side=False))
+        self._streams: "dict[int, dict]" = {}
+
+    def run(self) -> None:
+        self._conn.initiate_connection()
+        self._flush()
+        try:
+            while True:
+                try:
+                    data = self._sock.recv(65536)
+                except OSError:
+                    return
+                if not data:
+                    return
+                try:
+                    events = self._conn.receive_data(data)
+                except h2.exceptions.ProtocolError:
+                    return
+                closed = False
+                for event in events:
+                    if isinstance(event, h2.events.ConnectionTerminated):
+                        closed = True
+                    else:
+                        self._handle_event(event)
+                self._flush()
+                if closed:
+                    return
+        finally:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+
+    def _send_response_data(self, stream_id: int, data: bytes) -> None:
+        """Send data respecting HTTP/2 flow control and the negotiated max
+        frame size, instead of one send_data call for the whole chunk — a
+        single call larger than the current flow-control window (default
+        ~64KB) or the max frame size (default ~16KB) raises FlowControlError/
+        FrameTooLargeError, and naively swallowing that error would silently
+        drop the entire response body. An authenticated demo page (real JWT
+        claims/principal JSON embedded in the HTML) is easily big enough to
+        hit this — a page rendered for an anonymous visitor usually isn't,
+        which is why this went unnoticed until tested with a real login."""
+        remaining = data
+        while remaining:
+            window = min(self._conn.local_flow_control_window(stream_id), self._conn.max_outbound_frame_size)
+            if window <= 0:
+                try:
+                    incoming = self._sock.recv(65536)
+                except OSError:
+                    return
+                if not incoming:
+                    return
+                try:
+                    events = self._conn.receive_data(incoming)
+                except h2.exceptions.ProtocolError:
+                    return
+                for event in events:
+                    if not isinstance(event, h2.events.ConnectionTerminated):
+                        # Nested re-entry into _dispatch_stream is possible
+                        # here if a different stream happens to finish while
+                        # we're blocked waiting for window on this one — safe
+                        # (each dispatch only touches its own stream_id), just
+                        # unusual, and not expected in practice since the
+                        # gateway's own relay only ever opens one stream per
+                        # connection anyway.
+                        self._handle_event(event)
+                self._flush()
+                continue
+            chunk, remaining = remaining[:window], remaining[window:]
+            try:
+                self._conn.send_data(stream_id, chunk, end_stream=False)
+            except h2.exceptions.StreamClosedError:
+                return
+            except h2.exceptions.FlowControlError:
+                remaining = chunk + remaining
+                continue
+            self._flush()
+
+    def _handle_event(self, event) -> None:
+        if isinstance(event, h2.events.RequestReceived):
+            self._streams[event.stream_id] = {"headers": event.headers, "body": bytearray()}
+        elif isinstance(event, h2.events.DataReceived):
+            stream = self._streams.get(event.stream_id)
+            if stream is not None:
+                stream["body"] += event.data
+            self._conn.acknowledge_received_data(len(event.data), event.stream_id)
+        elif isinstance(event, h2.events.StreamEnded):
+            stream = self._streams.pop(event.stream_id, None)
+            if stream is not None:
+                self._dispatch_stream(event.stream_id, stream["headers"], bytes(stream["body"]))
+        elif isinstance(event, h2.events.StreamReset):
+            self._streams.pop(event.stream_id, None)
+
+    def _dispatch_stream(self, stream_id: int, raw_headers, body: bytes) -> None:
+        pseudo: "dict[str, str]" = {}
+        headers: "dict[str, str]" = {}
+        for name, value in raw_headers:
+            name = name.decode() if isinstance(name, bytes) else name
+            value = value.decode() if isinstance(value, bytes) else value
+            if name.startswith(":"):
+                pseudo[name] = value
+            else:
+                headers[name] = value
+        # HTTP/2 has no Transfer-Encoding/Content-Length concept of its own
+        # (framing comes from DATA/END_STREAM) — synthesize an accurate
+        # Content-Length from what was actually buffered so handlers written
+        # against HTTP/1.1 semantics (e.g. _read_chunked_request_body) still
+        # work correctly regardless of what, if anything, the client declared.
+        headers["Content-Length"] = str(len(body))
+        method = pseudo.get(":method", "GET")
+        path = pseudo.get(":path", "/")
+
+        def send_headers_frame(status: int, resp_headers: "list[tuple[str, str]]") -> None:
+            try:
+                self._conn.send_headers(stream_id, [(":status", str(status))] + resp_headers)
+            except h2.exceptions.StreamClosedError:
+                return
+            self._flush()
+
+        def send_data(chunk: bytes) -> None:
+            self._send_response_data(stream_id, chunk)
+
+        def end_stream() -> None:
+            try:
+                self._conn.send_data(stream_id, b"", end_stream=True)
+            except h2.exceptions.StreamClosedError:
+                return
+            self._flush()
+
+        try:
+            self._handler_cls(method, path, headers, body, send_headers_frame, send_data, end_stream)
+        except Exception:
+            try:
+                self._conn.send_headers(stream_id, [(":status", "500")], end_stream=True)
+                self._flush()
+            except Exception:
+                pass
+
+    def _flush(self) -> None:
+        data = self._conn.data_to_send()
+        if data:
+            try:
+                self._sock.sendall(data)
+            except OSError:
+                pass
+
+
+class QuietErrorMultiplexingHTTPServer(QuietErrorThreadingHTTPServer):
+    """Accepts both HTTP/1.1 and plaintext HTTP/2 (h2c) on the same port —
+    mirrors src/app.py's own _MultiplexingServer, minus the TLS/ALPN branch
+    (these demo apps have no TLS support). Peeks each new connection's first
+    bytes for the h2c client preface before constructing a handler, since h2
+    cannot itself speak HTTP/1.1 and BaseHTTPRequestHandler cannot itself
+    speak HTTP/2."""
+
+    def __init__(self, server_address, handler_cls: type, http2_handler_cls: type) -> None:
+        self._http2_handler_cls = http2_handler_cls
+        super().__init__(server_address, handler_cls)
+
+    def finish_request(self, request, client_address) -> None:
+        if _looks_like_http2_preface(request):
+            _Http2ServingConnection(request, self._http2_handler_cls).run()
+            return
+        super().finish_request(request, client_address)

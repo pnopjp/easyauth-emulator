@@ -113,11 +113,17 @@ class Handler(BaseHTTPRequestHandler, shared.ProtocolDemoMixin):
         self.wfile.write(body)
 
 
+class Http2Handler(shared.Http2RequestAdapterMixin, Handler):
+    """Same routes as Handler, served over plain HTTP/2 (h2c) instead of
+    HTTP/1.1 — see _sample_app_shared.py's own comment for why this exists
+    and what's deliberately out of scope (RFC 8441 WebSocket, TLS)."""
+
+
 _HTTP_PORT = int(_cfg("SAMPLE_APP_PORT", "8081") or "8081")
 
 
 def main() -> None:
-    server = shared.QuietErrorThreadingHTTPServer(("0.0.0.0", _HTTP_PORT), Handler)
+    server = shared.QuietErrorMultiplexingHTTPServer(("0.0.0.0", _HTTP_PORT), Handler, Http2Handler)
     print(f"{shared.APP_TITLE} listening on http://0.0.0.0:{_HTTP_PORT}")
     server.serve_forever()
 

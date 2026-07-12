@@ -49,9 +49,7 @@ grpcurl -d '{"name":"world"}' <app-name>.azurewebsites.net:443 echo.Echo/SayHell
    （このエミュレーターがHTTP/1.1側で既に注入しているものと同等のもの、`src/app.py`参照）が
    無いか確認する
 
-## 結果の記録
-
-両方のテストを実行した結果が、エミュレーターのgRPCアーキテクチャを決めます。
+## 結果が何を決めるか
 
 - **Easy Authを完全に素通りする** → エミュレーターのgRPCリスナーは、認証と無関係な単純な
   パススルーでよい（前述の選択肢A）。principal相当のメタデータ注入は不要で、実際の挙動と一致する
@@ -60,5 +58,23 @@ grpcurl -d '{"name":"world"}' <app-name>.azurewebsites.net:443 echo.Echo/SayHell
 - **保護されているが、メタデータ注入は無い（ゲートのみ）** → 中間案: 認証チェックはするが
   それ以外は素通しにする
 
-結果はこのリポジトリのmemory/`ToDo.md`に記録し、検証後はリソースグループを削除して
-課金を止めてください。
+## 結果(2026-07-12確定)
+
+| # | 質問 | 答え |
+| --- | --- | --- |
+| 1 | 未認証のgRPC呼び出しはアプリまで届くか | 届かない。Easy Authが即座に`401 Unauthorized`を返す(`grpcurl`で確認済み、ハングしない) |
+| 2 | 認証済みの呼び出しではprincipal相当の情報が注入されるか | される。このエミュレーターがHTTP/1.1で既に注入しているものと全く同じヘッダー集合(`src/app.py`の`_AUTH_HEADERS_TO_STRIP`参照)がgRPCメタデータとして届く: `x-ms-client-principal-name`、`x-ms-client-principal-id`、`x-ms-client-principal-idp`、`x-ms-client-principal`、`x-ms-token-aad-access-token`、`x-ms-token-aad-id-token` |
+| 3 | 認証済みの実機経路でgRPCのサーバーリフレクションは動くか | 動かない。有効な`AppServiceAuthSession`Cookieがある状態で`-proto`無し(内部でリフレクション、つまり双方向ストリーミングRPCを使う)の`grpcurl`は`400`/`502`で失敗し、リクエストはアプリのコンテナまで一切届かない(コンテナログで確認済み)。`-proto echo.proto`を指定してリフレクションを迂回すれば問題なく成功する |
+
+**結論**: 本物のAzure App ServiceのEasy Authは、gRPC(`HTTP20_ONLY_PORT`)リスナーを実際に保護しており、
+HTTP/1.1ヘッダーとして注入しているものと同じprincipal/トークン相当のメタデータをgRPCでも注入する。
+これは前述の選択肢のうち「選択肢B」にあたる。サーバーリフレクションについては、認証済みの場合に
+本物のプラットフォーム側の制約に当たっているようで、メタデータ注入の可否とは別問題。未認証状態での
+`grpcurl`による手動調査(またはこのエミュレーター自身。`tests/python/test_protocol_gaps.py`の
+`test_grpc_server_reflection_through_gateway`の通りリフレクションに正しく対応済み)には支障ないが、
+実際のクライアントの検出処理がリフレクションに依存している場合は留意する必要がある。
+
+## 後片付け
+
+結果は上記の通りすでにこのREADMEに記録済みです。検証後はリソースグループを削除して課金を
+止めてください。

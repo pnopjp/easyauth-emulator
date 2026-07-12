@@ -41,6 +41,16 @@ class EchoStub:
                 request_serializer=echo__pb2.HelloRequest.SerializeToString,
                 response_deserializer=echo__pb2.HelloReply.FromString,
                 _registered_method=True)
+        self.EchoStream = channel.stream_unary(
+                '/echo.Echo/EchoStream',
+                request_serializer=echo__pb2.HelloRequest.SerializeToString,
+                response_deserializer=echo__pb2.HelloReply.FromString,
+                _registered_method=True)
+        self.EchoBidi = channel.stream_stream(
+                '/echo.Echo/EchoBidi',
+                request_serializer=echo__pb2.HelloRequest.SerializeToString,
+                response_deserializer=echo__pb2.HelloReply.FromString,
+                _registered_method=True)
 
 
 class EchoServicer:
@@ -54,11 +64,38 @@ class EchoServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def EchoStream(self, request_iterator, context):
+        """Client-streaming: the client sends any number of messages, then a
+        single reply is returned once it closes its send side.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def EchoBidi(self, request_iterator, context):
+        """Bidirectional streaming: one reply per request, interleaved as they
+        arrive rather than only after the client closes its send side — proves
+        the gateway relays a genuinely open, ongoing stream in both directions.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_EchoServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'SayHello': grpc.unary_unary_rpc_method_handler(
                     servicer.SayHello,
+                    request_deserializer=echo__pb2.HelloRequest.FromString,
+                    response_serializer=echo__pb2.HelloReply.SerializeToString,
+            ),
+            'EchoStream': grpc.stream_unary_rpc_method_handler(
+                    servicer.EchoStream,
+                    request_deserializer=echo__pb2.HelloRequest.FromString,
+                    response_serializer=echo__pb2.HelloReply.SerializeToString,
+            ),
+            'EchoBidi': grpc.stream_stream_rpc_method_handler(
+                    servicer.EchoBidi,
                     request_deserializer=echo__pb2.HelloRequest.FromString,
                     response_serializer=echo__pb2.HelloReply.SerializeToString,
             ),
@@ -90,6 +127,60 @@ class Echo:
             request,
             target,
             '/echo.Echo/SayHello',
+            echo__pb2.HelloRequest.SerializeToString,
+            echo__pb2.HelloReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def EchoStream(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(
+            request_iterator,
+            target,
+            '/echo.Echo/EchoStream',
+            echo__pb2.HelloRequest.SerializeToString,
+            echo__pb2.HelloReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def EchoBidi(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/echo.Echo/EchoBidi',
             echo__pb2.HelloRequest.SerializeToString,
             echo__pb2.HelloReply.FromString,
             options,

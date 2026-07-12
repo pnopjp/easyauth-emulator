@@ -28,10 +28,6 @@ Serviceは「HTTP version: 2.0」と「Web sockets」を両方有効にしたと
 忠実性ギャップである(エミュレーターの設計への具体的な影響は`ToDo.md`とこのプロジェクトのmemory
 `project_proxy_streaming_and_websocket.md`を参照)。
 
-これはAzure Container Appsとは別の話で、Container Apps側には既に確認済みの無関係な実機の制約が
-ある(`ingress.transport: http2`/`auto`だとWebSocketが完全に動かない、`microsoft/azure-container-
-apps`のissue #280・#562)。Container Appsの忠実性は今回の結果に影響されない。
-
 ## デプロイ
 
 1. Linux Web App(Python 3.12ランタイム)を作成する。カスタム起動コマンドとWebSocketsに対応した
@@ -102,8 +98,8 @@ python check_rfc8441.py <app-name>.azurewebsites.net
 4. 検証後は`http20ProxyFlag`を`0`に戻す(`az webapp config set
    --generic-configurations '{"http20ProxyFlag": 0}'`)
 
-## 結果の記録
+## 後片付け
 
-結果はこのリポジトリのmemory/`ToDo.md`に記録し、検証後はAzureリソースグループを削除して課金を
+結果は上記の通りすでにこのREADMEに記録済みです。検証後はAzureリソースグループを削除して課金を
 止めてください(リソースグループを他の用途と共有していて残したい場合は、このWebアプリだけ削除
 すれば十分です)。

@@ -58,6 +58,21 @@ class _EchoServicer(echo_pb2_grpc.EchoServicer):
                     f"verification app's gRPC service on port {GRPC_PORT})"
         )
 
+    def EchoStream(self, request_iterator, context):
+        # Client-streaming: only ends (and only then replies) once the
+        # client closes its send side — exercises the same "keep consuming
+        # DATA frames until StreamEnded" path SayHello never touches.
+        names = [request.name for request in request_iterator]
+        return echo_pb2.HelloReply(message=f"Hello, {', '.join(names)}! ({len(names)} message(s))")
+
+    def EchoBidi(self, request_iterator, context):
+        # Bidirectional streaming: reply to each request as it arrives,
+        # rather than waiting for the client to finish sending — this is
+        # what actually exercises interleaved delivery in both directions,
+        # not just a client that eventually stops sending.
+        for request in request_iterator:
+            yield echo_pb2.HelloReply(message=f"Hello, {request.name}!")
+
 
 def _start_grpc_server() -> grpc.Server:
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
@@ -183,12 +198,20 @@ class Handler(BaseHTTPRequestHandler, shared.ProtocolDemoMixin):
         self.wfile.write(body)
 
 
+class Http2Handler(shared.Http2RequestAdapterMixin, Handler):
+    """Same routes as Handler, served over plain HTTP/2 (h2c) instead of
+    HTTP/1.1 — see _sample_app_shared.py's own comment for why this exists
+    and what's deliberately out of scope (RFC 8441 WebSocket, TLS). The
+    gRPC service on GRPC_PORT is unaffected — it's a real grpc.Server, not
+    this HTTP handler."""
+
+
 def main() -> None:
     grpc_server = _start_grpc_server()
     print(f"gRPC service   : localhost:{GRPC_PORT} (direct, reflection enabled)")
     print(f"HTTP verify app: http://localhost:{HTTP_PORT}/")
     print("Press Ctrl+C to stop.")
-    http_server = shared.QuietErrorThreadingHTTPServer(("0.0.0.0", HTTP_PORT), Handler)
+    http_server = shared.QuietErrorMultiplexingHTTPServer(("0.0.0.0", HTTP_PORT), Handler, Http2Handler)
     try:
         http_server.serve_forever()
     except KeyboardInterrupt:

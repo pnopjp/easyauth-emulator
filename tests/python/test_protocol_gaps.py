@@ -168,9 +168,75 @@ class _RawSniffer:
             pass
 
 
+class _MultiRecvSniffer:
+    """Like _RawSniffer, but records every recv() call (not just the first)
+    with its arrival time, to prove a relayed request body arrives as
+    several separate deliveries rather than being buffered in full before
+    being forwarded. Replies as soon as it sees the chunked terminator so
+    the client isn't left waiting once the body is fully sent."""
+
+    def __init__(self) -> None:
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(5)
+        self.port = self.sock.getsockname()[1]
+        self.chunks: "list[tuple[float, bytes]]" = []
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        try:
+            conn, _ = self.sock.accept()
+        except OSError:
+            return
+        start = time.monotonic()
+        conn.settimeout(8)
+        buffer = bytearray()
+        header_end = -1
+        try:
+            while True:
+                try:
+                    data = conn.recv(4096)
+                except socket.timeout:
+                    break
+                if not data:
+                    break
+                self.chunks.append((time.monotonic() - start, data))
+                buffer += data
+                if header_end == -1:
+                    # Only look for the chunk terminator in the BODY, past
+                    # the header/body boundary — a header value that happens
+                    # to end in "0" (e.g. a port number) would otherwise
+                    # false-positive on "0\r\n\r\n" before any body arrives.
+                    idx = buffer.find(b"\r\n\r\n")
+                    if idx != -1:
+                        header_end = idx + 4
+                if header_end != -1 and len(buffer) > header_end and buffer.endswith(b"0\r\n\r\n"):
+                    break
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
 @pytest.fixture
 def protocol_sniffer():
     sniffer = _RawSniffer()
+    yield sniffer
+    sniffer.close()
+
+
+@pytest.fixture
+def multi_recv_sniffer():
+    sniffer = _MultiRecvSniffer()
     yield sniffer
     sniffer.close()
 
@@ -221,13 +287,32 @@ def http2_client_gateway_port(tmp_path_factory, protocol_app):
     """HTTP20_ENABLED=true (client-facing HTTP/2), upstream is the
     verification app's plain HTTP/1.1 port. HTTP20_PROXY_MODE is deliberately
     left at its default (disabled): confirmed against a real Azure App
-    Service instance (tests/protocol/azure-websocket-poc) that an RFC 8441
+    Service instance (tools/azure-poc/azure-websocket-poc) that an RFC 8441
     WebSocket bootstrap always relays to APP_UPSTREAM as a classic HTTP/1.1
     Upgrade regardless of that setting."""
     proc, port = _start_gateway(tmp_path_factory, {
         "APP_UPSTREAM": f"http://127.0.0.1:{protocol_app['http_port']}",
         "SKIP_AUTH_ROUTES": "/ws/",
         "HTTP20_ENABLED": "true",
+    })
+    yield port
+    _stop(proc)
+
+
+@pytest.fixture(scope="module")
+def http2_all_mode_gateway_port(tmp_path_factory, protocol_app):
+    """HTTP20_ENABLED=true, HTTP20_PROXY_MODE=all, upstream is the
+    verification app's HTTP port — this mode genuinely relays to
+    APP_UPSTREAM over HTTP/2, which used to 502 against these demo apps
+    (plain HTTP/1.1-only http.server) until they gained h2c support."""
+    proc, port = _start_gateway(tmp_path_factory, {
+        "APP_UPSTREAM": f"http://127.0.0.1:{protocol_app['http_port']}",
+        # /healthz is intercepted by the gateway itself (_dispatch), never
+        # reaching _proxy_to — /api/session is one of APP_UPSTREAM's own
+        # routes, so it actually exercises the HTTP/2 upstream relay.
+        "SKIP_AUTH_ROUTES": "/api/session",
+        "HTTP20_ENABLED": "true",
+        "HTTP20_PROXY_MODE": "all",
     })
     yield port
     _stop(proc)
@@ -241,7 +326,7 @@ def grpc_gateway_port(tmp_path_factory, protocol_app):
     server) and the plain HTTP endpoints can't share one gateway instance."""
     proc, port = _start_gateway(tmp_path_factory, {
         "APP_UPSTREAM": f"http://127.0.0.1:{protocol_app['grpc_port']}",
-        "SKIP_AUTH_ROUTES": "/echo\\.Echo/",
+        "SKIP_AUTH_ROUTES": "/echo\\.Echo/,/grpc\\.reflection\\.",
         "HTTP20_ENABLED": "true",
         "HTTP20_PROXY_MODE": "grpc-only",
     })
@@ -388,6 +473,46 @@ def test_websocket_upgrade_and_echo_through_gateway(gateway_port):
         assert echoed == bytes([0x81, len(payload)]) + payload
 
 
+def _send_http2_get(host: str, port: int, path: str, timeout: float = 5,
+                     extra_headers: "list[tuple[str, str]] | None" = None) -> "tuple[str, bytes]":
+    """Plaintext h2c GET, prior knowledge (no Upgrade dance) — returns
+    (status, body). extra_headers are sent verbatim (lowercase, matching real
+    HTTP/2 wire format — RFC 7540 §8.1.2 — and how the gateway's own HTTP/2
+    upstream relay actually sends them), letting tests simulate the
+    gateway's injected auth headers without needing a real login."""
+    conn = h2.connection.H2Connection(config=h2.config.H2Configuration(client_side=True))
+    conn.initiate_connection()
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        sock.settimeout(timeout)
+        sock.sendall(conn.data_to_send())
+        stream_id = conn.get_next_available_stream_id()
+        conn.send_headers(stream_id, [
+            (":method", "GET"), (":path", path), (":scheme", "http"),
+            (":authority", f"{host}:{port}"),
+        ] + (extra_headers or []), end_stream=True)
+        sock.sendall(conn.data_to_send())
+
+        status = ""
+        body = b""
+        done = False
+        while not done:
+            data = sock.recv(65536)
+            if not data:
+                break
+            for event in conn.receive_data(data):
+                if isinstance(event, h2.events.ResponseReceived):
+                    status = dict(event.headers).get(b":status", b"").decode()
+                elif isinstance(event, h2.events.DataReceived):
+                    body += event.data
+                    conn.acknowledge_received_data(len(event.data), event.stream_id)
+                elif isinstance(event, h2.events.StreamEnded):
+                    done = True
+            out = conn.data_to_send()
+            if out:
+                sock.sendall(out)
+        return status, body
+
+
 def _websocket_over_http2_rfc8441(port: int, extra_headers: "list[tuple[str, str]]") -> "tuple[bytes, bytes]":
     """Bootstrap a WebSocket over HTTP/2 via an RFC 8441 extended CONNECT
     (:method CONNECT, :protocol websocket), send one text frame, and return
@@ -454,7 +579,7 @@ def test_websocket_upgrade_over_http2_rfc8441_through_gateway(http2_client_gatew
     """RFC 8441: bootstrap WebSocket over HTTP/2 via an extended CONNECT
     (:method CONNECT, :protocol websocket) instead of the classic HTTP/1.1
     Upgrade. Confirmed against a real Azure App Service instance
-    (tests/protocol/azure-websocket-poc) that it relays this to the backend
+    (tools/azure-poc/azure-websocket-poc) that it relays this to the backend
     as a classic HTTP/1.1 Upgrade regardless of HTTP20_PROXY_MODE, so the
     gateway's _Http2StreamHandler does the same and this test expects the
     same echo behavior as the HTTP/1.1 test above, just bootstrapped
@@ -534,6 +659,81 @@ def test_websocket_disabled_does_not_advertise_connect_protocol_over_http2(webso
     assert conn.remote_settings.get(h2.settings.SettingCodes.ENABLE_CONNECT_PROTOCOL, 0) == 0
 
 
+def test_protocol_app_accepts_direct_http2(protocol_app):
+    """The verification app (tests/protocol/app.py, sharing
+    src/_sample_app_shared.py with src/sample_app.py) speaks plaintext HTTP/2
+    (h2c) directly, alongside HTTP/1.1 — no gateway involved here."""
+    status, body = _send_http2_get("127.0.0.1", protocol_app["http_port"], "/healthz")
+    assert status == "200"
+    assert body == b"ok"
+
+
+def test_protocol_app_recognizes_easyauth_headers_over_http2(protocol_app):
+    """Regression test: HTTP/2 mandates lowercase header names on the wire
+    (RFC 7540 §8.1.2), and the gateway's own HTTP/2 upstream relay
+    (_http2_relay_request) already lowercases everything it sends — but
+    _sample_app_shared.py's _header() used to do a case-sensitive dict
+    lookup against EASYAUTH_HEADER_NAMES' mixed-case names (e.g.
+    "X-MS-CLIENT-PRINCIPAL-IDP"), so injected auth headers silently
+    stopped being recognized whenever the upstream relay used HTTP/2
+    (HTTP20_PROXY_MODE="all"/"grpc-only") instead of HTTP/1.1 — even though
+    the gateway had injected them correctly."""
+    status, body = _send_http2_get(
+        "127.0.0.1", protocol_app["http_port"], "/api/session",
+        extra_headers=[
+            ("x-ms-client-principal-idp", "aad"),
+            ("x-forwarded-user", "someone@example.com"),
+        ],
+    )
+    assert status == "200"
+    result = json.loads(body)
+    assert result["provider"] == "aad"
+    assert result["user"] == "someone@example.com"
+
+
+def test_protocol_app_serves_large_http2_response_completely(protocol_app):
+    """Regression test: a single send_data call larger than the current
+    HTTP/2 flow-control window (default ~64KB) or the negotiated max frame
+    size (default ~16KB) raises FlowControlError/FrameTooLargeError —
+    _Http2ServingConnection used to swallow that and silently drop the
+    entire response body. An anonymous page render is small enough to never
+    hit this, but a real authenticated principal (many group claims, like a
+    real Entra ID token) embedded in the rendered HTML easily exceeds both
+    limits, which is how this went unnoticed until tested with real login
+    data instead of an anonymous request."""
+    claims = [
+        {"typ": "groups", "val": f"11111111-2222-3333-4444-{i:012d}"}
+        for i in range(600)
+    ]
+    principal = {"auth_typ": "aad", "claims": claims}
+    principal_b64 = base64.b64encode(json.dumps(principal).encode()).decode()
+    # /session (not /) renders the principal/claims page on this app — see
+    # tests/protocol/app.py, which puts the WS/SSE/gRPC demo page at / instead.
+    status, body = _send_http2_get(
+        "127.0.0.1", protocol_app["http_port"], "/session", timeout=10,
+        extra_headers=[
+            ("x-ms-client-principal", principal_b64),
+            ("x-ms-client-principal-idp", "aad"),
+        ],
+    )
+    assert status == "200"
+    assert len(body) > 65536, f"expected a response spanning multiple flow-control windows, got {len(body)} bytes"
+    assert b"</html>" in body, "response body was truncated before the closing </html> tag"
+
+
+def test_http20_proxy_mode_all_reaches_protocol_app_over_http2(http2_all_mode_gateway_port):
+    """HTTP20_PROXY_MODE=all genuinely relays to APP_UPSTREAM over HTTP/2 —
+    this used to 502 against the verification apps (plain HTTP/1.1-only
+    http.server) until they gained h2c support alongside HTTP/1.1. /api/session
+    is APP_UPSTREAM's own route (unlike /healthz, which the gateway answers
+    itself without ever reaching APP_UPSTREAM), so a 200 here proves the
+    relay actually completed end to end."""
+    status, body = _send_http2_get("127.0.0.1", http2_all_mode_gateway_port, "/api/session")
+    assert status == "200"
+    result = json.loads(body)
+    assert "authenticated" in result
+
+
 def test_sse_streamed_incrementally_through_gateway(gateway_port):
     """The verification app sends one SSE event per second
     (SSE_EVENT_COUNT=10 by default) with no Content-Length, relying on
@@ -571,6 +771,35 @@ def test_chunked_request_body_forwarded_through_gateway(gateway_port):
     assert result["received_bytes"] == len(text.encode())
 
 
+def test_chunked_request_body_streamed_incrementally_to_upstream(tmp_path_factory, multi_recv_sniffer):
+    """The request body must reach APP_UPSTREAM as it's read from the real
+    client, not only after the client finishes sending — a buffered relay
+    would deliver the whole body in one burst right at the end, collapsing
+    the delay between each chunk to ~0s; a genuine incremental relay spreads
+    the deliveries out to match it."""
+    proc, port = _start_gateway(tmp_path_factory, {
+        "APP_UPSTREAM": f"http://127.0.0.1:{multi_recv_sniffer.port}",
+        "SKIP_AUTH_ROUTES": "/chunked/",
+    })
+    try:
+        parts = ["hello", " stre", "aming", " requ", "est!!"]
+        try:
+            send_chunked("127.0.0.1", port, "/chunked/echo", parts, delay=0.3)
+        except (TimeoutError, socket.timeout):
+            pass  # only the upstream's own view of arrival timing matters here
+        assert len(multi_recv_sniffer.chunks) > 2, (
+            f"expected several separate deliveries, not one buffered burst — "
+            f"got {multi_recv_sniffer.chunks!r}"
+        )
+        gaps = [t2 - t1 for (t1, _), (t2, _) in
+                zip(multi_recv_sniffer.chunks, multi_recv_sniffer.chunks[1:])]
+        assert any(gap > 0.15 for gap in gaps), (
+            f"deliveries arrived too close together to be genuinely incremental: {gaps!r}"
+        )
+    finally:
+        _stop(proc)
+
+
 @pytest.mark.skipif(not HAS_GRPC, reason="grpcio not installed — see requirements-test.txt")
 def test_grpc_disabled_by_default_does_not_hang(gateway_port):
     """HTTP20_ENABLED/HTTP20_PROXY_MODE default to off (mirrors App Service's
@@ -593,6 +822,125 @@ def test_grpc_call_through_gateway(grpc_gateway_port):
     channel = grpc.insecure_channel(f"127.0.0.1:{grpc_gateway_port}")
     try:
         stub = echo_pb2_grpc.EchoStub(channel)
+        response = stub.SayHello(echo_pb2.HelloRequest(name="world"), timeout=GRPC_TIMEOUT)
+        assert "world" in response.message
+    finally:
+        channel.close()
+
+
+def test_grpc_large_response_through_gateway_over_http2(grpc_gateway_port):
+    """Regression test: _Http2Connection.send_stream_response/send_stream_data
+    (the gateway's own client-facing HTTP/2 response sending) used to send a
+    response body in a single send_data call — a real HTTP/2 client (e.g. a
+    browser over TLS+ALPN, or this gRPC client here) would trigger
+    FlowControlError/FrameTooLargeError once a response exceeded the default
+    ~64KB flow-control window or ~16KB max frame size, which was either left
+    uncaught (surfacing as a 500) or silently swallowed (surfacing as a
+    truncated/empty response) depending on the code path. A large gRPC reply
+    (spanning several flow-control windows) exercises exactly this, without
+    needing a real login to produce a large authenticated page."""
+    channel = grpc.insecure_channel(f"127.0.0.1:{grpc_gateway_port}")
+    try:
+        stub = echo_pb2_grpc.EchoStub(channel)
+        big_name = "x" * 200_000
+        response = stub.SayHello(echo_pb2.HelloRequest(name=big_name), timeout=GRPC_TIMEOUT)
+        assert big_name in response.message
+    finally:
+        channel.close()
+
+
+@pytest.mark.skipif(not HAS_GRPC, reason="grpcio not installed — see requirements-test.txt")
+def test_grpc_client_streaming_through_gateway(grpc_gateway_port):
+    """A client-streaming RPC — the client keeps its send side open across
+    multiple messages before closing it — used to hang forever: the gateway
+    only ever dispatched a stream once StreamEnded fired, which never
+    happened while the client kept sending (see ToDo.md). Dispatch is now
+    immediate, and the request body streams to the upstream as it arrives."""
+    channel = grpc.insecure_channel(f"127.0.0.1:{grpc_gateway_port}")
+    try:
+        stub = echo_pb2_grpc.EchoStub(channel)
+
+        def _requests():
+            for name in ("alice", "bob", "carol"):
+                yield echo_pb2.HelloRequest(name=name)
+                time.sleep(0.05)  # force separate DATA frames, not one burst
+
+        response = stub.EchoStream(_requests(), timeout=GRPC_TIMEOUT)
+        assert "alice" in response.message
+        assert "bob" in response.message
+        assert "carol" in response.message
+    finally:
+        channel.close()
+
+
+@pytest.mark.skipif(not HAS_GRPC, reason="grpcio not installed — see requirements-test.txt")
+def test_grpc_bidi_streaming_through_gateway(grpc_gateway_port):
+    """Bidirectional streaming: the server replies to each request as it
+    arrives, not only once the client finishes sending — the same shape as
+    gRPC server reflection (see test_grpc_server_reflection_... below), and
+    used to hang identically."""
+    channel = grpc.insecure_channel(f"127.0.0.1:{grpc_gateway_port}")
+    try:
+        stub = echo_pb2_grpc.EchoStub(channel)
+
+        def _requests():
+            for name in ("alice", "bob", "carol"):
+                yield echo_pb2.HelloRequest(name=name)
+
+        responses = [r.message for r in stub.EchoBidi(_requests(), timeout=GRPC_TIMEOUT)]
+        assert len(responses) == 3
+        assert "alice" in responses[0]
+        assert "bob" in responses[1]
+        assert "carol" in responses[2]
+    finally:
+        channel.close()
+
+
+@pytest.mark.skipif(not HAS_GRPC, reason="grpcio not installed — see requirements-test.txt")
+def test_grpc_server_reflection_through_gateway(grpc_gateway_port):
+    """Server reflection — what `grpcurl` relies on when invoked without
+    -proto — is itself a bidirectional-streaming RPC, and used to hang
+    through the gateway for the same reason client-streaming/bidi calls did
+    (see ToDo.md and tests/protocol/README.md's "-proto" workaround note)."""
+    from grpc_reflection.v1alpha import reflection_pb2, reflection_pb2_grpc
+
+    channel = grpc.insecure_channel(f"127.0.0.1:{grpc_gateway_port}")
+    try:
+        stub = reflection_pb2_grpc.ServerReflectionStub(channel)
+        request = reflection_pb2.ServerReflectionRequest(list_services="")
+        responses = list(stub.ServerReflectionInfo(iter([request]), timeout=GRPC_TIMEOUT))
+        assert len(responses) == 1
+        service_names = {s.name for s in responses[0].list_services_response.service}
+        assert "echo.Echo" in service_names
+    finally:
+        channel.close()
+
+
+@pytest.mark.skipif(not HAS_GRPC, reason="grpcio not installed — see requirements-test.txt")
+def test_grpc_client_streaming_abort_mid_body_does_not_wedge_gateway(grpc_gateway_port):
+    """If the client cancels partway through a client-streaming upload, the
+    gateway must notice (not hang waiting for a body that will never finish)
+    and must not wedge the connection for subsequent requests."""
+    channel = grpc.insecure_channel(f"127.0.0.1:{grpc_gateway_port}")
+    try:
+        stub = echo_pb2_grpc.EchoStub(channel)
+        release = threading.Event()
+
+        def _requests():
+            yield echo_pb2.HelloRequest(name="alice")
+            # Blocks (not sleeps) so grpc's own request-iterating thread
+            # doesn't linger past this test once cancelled below.
+            release.wait(timeout=GRPC_TIMEOUT)
+
+        call = stub.EchoStream.future(_requests())
+        time.sleep(0.2)
+        call.cancel()
+        with pytest.raises(grpc.FutureCancelledError):
+            call.result(timeout=GRPC_TIMEOUT)
+        release.set()
+
+        # The gateway (and this same channel/connection) must still work
+        # afterward for an ordinary call.
         response = stub.SayHello(echo_pb2.HelloRequest(name="world"), timeout=GRPC_TIMEOUT)
         assert "world" in response.message
     finally:
