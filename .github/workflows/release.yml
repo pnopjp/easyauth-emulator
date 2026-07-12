@@ -240,7 +240,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install test dependencies
-        run: pip install -r requirements-test.txt
+        run: pip install -r requirements.txt -r requirements-test.txt
 
       - name: Python unit tests
         run: python -m pytest tests/python/ -v
