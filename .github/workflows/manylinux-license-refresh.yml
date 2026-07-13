@@ -1,0 +1,122 @@
+name: Manylinux License Refresh
+
+# scripts/manylinux_images.json pins the manylinux build image(s) by digest
+# (see release.yml's build job). When that pin is bumped, the OS packages
+# bundled into the Linux release binary (openssl-libs, zlib, etc.) can change
+# version, which would make scripts/manylinux_licenses.json -- and therefore
+# THIRD_PARTY_LICENSES -- stale. This workflow re-derives both automatically
+# by querying the new image's RPM database, so nobody has to remember to do
+# it by hand.
+on:
+  pull_request:
+    paths:
+      - scripts/manylinux_images.json
+
+jobs:
+  refresh:
+    name: Refresh manylinux_licenses.json + THIRD_PARTY_LICENSES
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Refresh manylinux_licenses.json
+        run: .venv/bin/python scripts/refresh_manylinux_licenses.py
+
+      - name: Regenerate THIRD_PARTY_LICENSES
+        run: .venv/bin/python scripts/gen_licenses.py
+
+      - name: Check for changes
+        id: diff
+        run: |
+          git add scripts/manylinux_licenses.json THIRD_PARTY_LICENSES
+          if git diff --quiet --cached; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      # Same-repo PR: auto-commit
+      - name: Auto-commit (same-repo PR)
+        if: |
+          steps.diff.outputs.changed == 'true' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add scripts/manylinux_licenses.json THIRD_PARTY_LICENSES
+          git commit -m "chore: refresh manylinux_licenses.json and THIRD_PARTY_LICENSES"
+          git push
+
+      # Fork PR: can't push to the contributor's branch -- ask them to run it locally
+      - name: Comment with instructions (fork PR)
+        if: |
+          steps.diff.outputs.changed == 'true' &&
+          github.event.pull_request.head.repo.full_name != github.repository
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: [
+                '⚠️ **`scripts/manylinux_images.json` changed.**',
+                '',
+                '`scripts/manylinux_licenses.json` and `THIRD_PARTY_LICENSES` need to be',
+                'refreshed to match. Please run the following locally (requires Docker)',
+                'and commit the result:',
+                '```',
+                'python scripts/refresh_manylinux_licenses.py',
+                'python scripts/gen_licenses.py',
+                'git add scripts/manylinux_licenses.json THIRD_PARTY_LICENSES',
+                'git commit -m "chore: refresh manylinux_licenses.json and THIRD_PARTY_LICENSES"',
+                '```',
+              ].join('\n')
+            })
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Required status check — blocks merge if the refresh above left anything
+  # uncommitted (e.g. a fork PR that hasn't run the script locally yet)
+  # ─────────────────────────────────────────────────────────────────────────
+  check:
+    name: manylinux licenses up to date
+    needs: refresh
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Verify manylinux_licenses.json matches the pinned image
+        run: .venv/bin/python scripts/refresh_manylinux_licenses.py --check
+
+      - name: Verify THIRD_PARTY_LICENSES is up to date
+        run: .venv/bin/python scripts/gen_licenses.py --check
