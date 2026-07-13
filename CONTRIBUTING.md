@@ -52,6 +52,26 @@ Official distributable binaries are built and published by GitHub Actions.
 - Do not treat locally built binaries as release artifacts.
 - Use CI-produced artifacts for distribution and release workflows.
 
+## Linux Build & Third-Party License Tracking
+
+The Linux release binary is built inside a pinned `manylinux_2_28` container (AlmaLinux 8, glibc 2.28) rather than directly on the CI runner, so it isn't tied to whatever glibc the runner's own Ubuntu happens to ship. Two files under `scripts/` are edited by hand — nothing in CI ever writes to them.
+
+### `scripts/manylinux_images.json`
+
+Pins the build image (by digest, not a mutable `:latest` tag) and `python_version`, the Python version used to build every platform's release binary (Windows/macOS via `actions/setup-python`, Linux via `dnf install python<version>`).
+
+- **`python_version`** — Python is fully bundled into the binary by PyInstaller, so there's no end-user compatibility reason to hold it back. Move to a newer version whenever it's actually usable: it must (1) be available as a `python<version>` package in AlmaLinux 8's dnf repos, (2) have compatible wheels for every dependency in `requirements.txt`, and (3) be supported by PyInstaller. In practice this means upgrading opportunistically as those line up, not waiting for anything to force it — though staying past the current version's own upstream EOL (Python security patches stop ~5 years after release) is a hard forcing function.
+- **The manylinux tag itself** (e.g. `manylinux_2_28` → a newer tag) — change this when the current base OS (AlmaLinux 8) approaches end of life, when PyPA stops publishing new builds for this tag, or when a specific technical need requires a newer base.
+- **Just the digest, same tag** — bump this to pick up a fix to something baked into the image itself (its `dnf`/tooling, base filesystem). This is *not* how you fix stale system-library versions (openssl-libs, zlib, etc.) — `dnf install` always fetches those live from AlmaLinux's repos regardless of which digest is pinned, so a stale `scripts/manylinux_licenses.json` is fixed by re-running `scripts/refresh_manylinux_licenses.py`, not by bumping this file.
+
+### `scripts/gen_licenses.py`
+
+The `THIRD_PARTY_LICENSES` generation logic. Edit this when the license disclosure itself needs to change (a new category of bundled dependency, wording, formatting, a fix). No automation ever rewrites this file's code — there is no check that flags when it needs to change, so review it deliberately when adding dependencies or bundled native libraries.
+
+### Everything else is generated
+
+`scripts/manylinux_licenses.json` and `THIRD_PARTY_LICENSES` are regenerated automatically by CI from the two files above. Don't hand-edit them: run `python scripts/refresh_manylinux_licenses.py` (requires Docker) and `python scripts/gen_licenses.py` locally, or let CI auto-commit the fix on a pull request.
+
 ## Local Development Testing
 
 ### Browser

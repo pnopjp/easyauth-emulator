@@ -52,6 +52,28 @@ graph LR
 - ローカルビルドのバイナリをリリース成果物として扱わないでください。
 - 配布・リリースワークフローには CI が生成した成果物を使用してください。
 
+## Linuxビルドとサードパーティライセンス管理
+
+Linux版のリリースバイナリは、CIランナー自身のUbuntuではなく、pinした`manylinux_2_28`コンテナ(AlmaLinux 8, glibc 2.28)内でビルドされます。`scripts/`配下の2ファイルは人が手で編集するもので、CIがこの2つを書き換えることはありません。
+
+### `scripts/manylinux_images.json`
+
+ビルドイメージ(`:latest`ではなくdigestで固定)と、全プラットフォームのビルド(Windows/macOSは`actions/setup-python`、Linuxは`dnf install python<version>`)に使う`python_version`を定義します。
+
+- **`python_version`**: PythonはPyInstallerでバイナリに丸ごと同梱されるので、エンドユーザー環境との互換性を理由に古く抑える必要はありません。実際に使えるようになり次第、積極的に新しいバージョンへ上げてください。「使えるかどうか」は次の3条件で決まります。(1) AlmaLinux 8のdnfリポジトリに`python<version>`パッケージとして提供されている、(2) `requirements.txt`の全依存パッケージがそのバージョン向けのwheelを持っている、(3) PyInstallerがそのバージョンに対応している。何かに強制されて上げるというより、条件が揃い次第上げていくものですが、今のバージョンの上流EOL(Pythonのセキュリティサポートはリリースから概ね5年)を過ぎてしまう前に上げることだけは必須です。
+- **manylinuxタグ自体**(例: `manylinux_2_28`から新しいタグへ): 今のベースOS(AlmaLinux 8)がサポート終了に近づいたとき、PyPAがこのタグへの新規ビルド提供をやめたとき、あるいはより新しいベースでないと得られない技術的な必要性が出たときに変更します。
+- **同じタグのままdigestだけ更新する**: イメージ自体に焼き込まれているもの(`dnf`本体やベースのファイルシステムなど)の修正を取り込みたいときに行います。`openssl-libs`・`zlib`等の同梱ライブラリのバージョンがズレたことが理由でこれを行う必要は**ありません**。`dnf install`はどのdigestを固定していてもAlmaLinuxの生きたリポジトリから取得するため、`scripts/manylinux_licenses.json`が古くなった場合は`scripts/refresh_manylinux_licenses.py`を再実行するだけで直ります。
+
+### `scripts/gen_licenses.py`
+
+`THIRD_PARTY_LICENSES`を生成するロジックそのものです。ライセンス表記の方針を変える(同梱する依存関係の種類を追加する、文言・書式を変える、不具合を直す)場合に編集します。このファイルのロジックが古くなったことを検知する仕組みは無いので、依存関係やネイティブライブラリの同梱内容を変えたときは意識的に見直してください。
+
+### それ以外は自動生成
+
+`scripts/manylinux_licenses.json`と`THIRD_PARTY_LICENSES`は、上記2ファイルからCIが自動で再生成します。手で編集せず、ローカルで確認する場合は`python scripts/refresh_manylinux_licenses.py`(Dockerが必要)と`python scripts/gen_licenses.py`を実行するか、PR上でCIが自動コミットするのに任せてください。
+
+この2ファイルから生成される`scripts/manylinux_licenses.json`と`THIRD_PARTY_LICENSES`はCIが自動で再生成します。手で編集せず、ローカルで確認する場合は`python scripts/refresh_manylinux_licenses.py`(Dockerが必要)と`python scripts/gen_licenses.py`を実行するか、PR上でCIが自動コミットするのに任せてください。
+
 ## ローカル開発テスト
 
 ### ブラウザ
