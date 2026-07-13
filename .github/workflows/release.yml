@@ -15,7 +15,7 @@ jobs:
     name: Check licenses
     runs-on: ubuntu-latest
     outputs:
-      changed: ${{ steps.check.outputs.changed }}
+      changed: ${{ steps.combine.outputs.changed }}
 
     steps:
       - uses: actions/checkout@v6
@@ -28,6 +28,32 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install -r requirements.txt
+
+      # dnf installs the system libraries (openssl-libs, zlib, etc.) from
+      # AlmaLinux's live package mirrors at container run time -- pinning the
+      # manylinux image by digest does NOT freeze those versions, since the
+      # mirrors keep serving whatever AlmaLinux currently has (e.g. after a
+      # CVE patch). So manylinux_licenses.json can go stale even when nobody
+      # touched scripts/manylinux_images.json. Re-check for real, every
+      # release, using the same live dnf install the actual build uses.
+      - name: Check manylinux_licenses.json against the live build environment
+        id: check-manylinux
+        run: |
+          if .venv/bin/python scripts/refresh_manylinux_licenses.py --check 2> manylinux-check.log; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            cat manylinux-check.log
+            {
+              echo "### :warning: manylinux_licenses.json is out of date"
+              echo
+              echo "AlmaLinux's live package repos have moved on since this was last generated. Run \`python scripts/refresh_manylinux_licenses.py\` and commit the result."
+              echo
+              echo '```diff'
+              cat manylinux-check.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Check THIRD_PARTY_LICENSES
         id: check
@@ -44,6 +70,15 @@ jobs:
               cat check.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Combine results
+        id: combine
+        run: |
+          if [ "${{ steps.check-manylinux.outputs.changed }}" = "true" ] || [ "${{ steps.check.outputs.changed }}" = "true" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -79,8 +114,10 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install -r requirements.txt
 
-      - name: Regenerate THIRD_PARTY_LICENSES
-        run: .venv/bin/python scripts/gen_licenses.py
+      - name: Regenerate manylinux_licenses.json and THIRD_PARTY_LICENSES
+        run: |
+          .venv/bin/python scripts/refresh_manylinux_licenses.py
+          .venv/bin/python scripts/gen_licenses.py
 
       - name: Open PR with the update
         env:
@@ -90,7 +127,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add THIRD_PARTY_LICENSES
+          git add scripts/manylinux_licenses.json THIRD_PARTY_LICENSES
           git commit -m "chore: update THIRD_PARTY_LICENSES"
           git push origin "$BRANCH"
           gh pr create --base main --head "$BRANCH" \
@@ -147,20 +184,37 @@ jobs:
           - os: ubuntu-latest
             platform: linux-amd64
             vscode_target: linux-x64
+            manylinux_arch: x86_64
           - os: ubuntu-24.04-arm
             platform: linux-arm64
             vscode_target: linux-arm64
+            manylinux_arch: aarch64
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v6
 
-      # ── Python binary ──────────────────────────────────────────────────
+      # Single source of truth for the Python version bundled into every
+      # platform's release binary (see scripts/manylinux_images.json). Keeping
+      # this in one place means the Windows/macOS setup-python below, the
+      # Linux dnf install further down, and scripts/refresh_manylinux_licenses.py
+      # can never drift apart.
+      - name: Resolve Python version
+        id: pyver
+        shell: bash
+        run: |
+          VERSION=$(jq -r '.python_version' scripts/manylinux_images.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # ── Python binary (Windows / macOS) ─────────────────────────────────
+      # Built directly on the runner's own Python.
       - uses: actions/setup-python@v6
+        if: runner.os != 'Linux'
         with:
-          python-version: '3.12'
+          python-version: ${{ steps.pyver.outputs.version }}
 
       - name: Install dependencies
+        if: runner.os != 'Linux'
         shell: bash
         run: |
           python -m venv .venv
@@ -173,8 +227,55 @@ jobs:
           fi
 
       - name: Build binary
+        if: runner.os != 'Linux'
         shell: bash
         run: $VENV_BIN/python scripts/package.py
+
+      # ── Python binary (Linux) ───────────────────────────────────────────
+      # Built inside a manylinux_2_28 (AlmaLinux 8 / glibc 2.28) container so the
+      # resulting binary isn't tied to the glibc of whatever Ubuntu the runner
+      # happens to be on (ubuntu-latest tracks the newest release, whose glibc a
+      # user's older distro/WSL image may not have yet).
+      #
+      # The image reference is resolved from scripts/manylinux_images.json (the
+      # single source of truth, pinned by digest) rather than hardcoded here, so
+      # it can never drift from what scripts/gen_licenses.py used to derive the
+      # THIRD_PARTY_LICENSES entries for these bundled OS packages.
+      - name: Resolve manylinux image
+        if: runner.os == 'Linux'
+        id: manylinux
+        shell: bash
+        run: |
+          IMAGE=$(jq -r --arg k "${{ matrix.manylinux_arch }}" '.[$k]' scripts/manylinux_images.json)
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Build binary (manylinux container)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          PYTHON_VERSION="${{ steps.pyver.outputs.version }}"
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" -w /workspace \
+            -e PYTHON_VERSION="$PYTHON_VERSION" \
+            ${{ steps.manylinux.outputs.image }} \
+            bash -c '
+              set -e
+              dnf install -y "python$PYTHON_VERSION" "python$PYTHON_VERSION-devel"
+              "/usr/bin/python$PYTHON_VERSION" -m venv .venv
+              .venv/bin/pip install --quiet --upgrade pip
+              .venv/bin/pip install --quiet pyinstaller -r requirements.txt
+              .venv/bin/python scripts/package.py
+            '
+
+      # Catches the case where a dependency change makes PyInstaller start
+      # bundling some new native library that scripts/gen_licenses.py's
+      # SYSTEM_LIBRARY_METADATA doesn't know about yet -- this can only be
+      # checked after a real build, so it lives here rather than in the
+      # Docker-free check-licenses job.
+      - name: Check bundled libraries are all accounted for
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 scripts/check_bundled_libraries.py dist/easyauth-emulator
 
       - name: Upload binary archive
         uses: actions/upload-artifact@v7

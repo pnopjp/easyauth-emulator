@@ -5,15 +5,18 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────
-  # Detect whether requirements.txt changed in this PR
+  # Detect whether requirements.txt or the generator script itself changed
+  # in this PR — either one can desync THIRD_PARTY_LICENSES from what
+  # `gen_licenses.py` would produce.
   # ─────────────────────────────────────────────────────────────────────────
   changes:
-    name: Detect requirements changes
+    name: Detect license-relevant changes
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
     outputs:
       requirements_changed: ${{ steps.filter.outputs.requirements }}
+      license_relevant_changed: ${{ steps.filter.outputs.license_relevant }}
 
     steps:
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4
@@ -22,6 +25,10 @@ jobs:
           filters: |
             requirements:
               - requirements.txt
+            license_relevant:
+              - requirements.txt
+              - scripts/gen_licenses.py
+              - scripts/manylinux_licenses.json
 
   # ─────────────────────────────────────────────────────────────────────────
   # Post a comment on PRs that change requirements.txt
@@ -135,7 +142,7 @@ jobs:
   update-licenses:
     name: Update THIRD_PARTY_LICENSES
     needs: changes
-    if: needs.changes.outputs.requirements_changed == 'true'
+    if: needs.changes.outputs.license_relevant_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -253,27 +260,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: No requirements change
-        if: needs.changes.outputs.requirements_changed != 'true'
-        run: echo "requirements.txt unchanged; skip license verification"
+      - name: No license-relevant change
+        if: needs.changes.outputs.license_relevant_changed != 'true'
+        run: echo "requirements.txt and scripts/gen_licenses.py unchanged; skip license verification"
 
       - uses: actions/checkout@v6
-        if: needs.changes.outputs.requirements_changed == 'true'
+        if: needs.changes.outputs.license_relevant_changed == 'true'
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
       - uses: actions/setup-python@v6
-        if: needs.changes.outputs.requirements_changed == 'true'
+        if: needs.changes.outputs.license_relevant_changed == 'true'
         with:
           python-version: '3.12'
 
       - name: Install dependencies
-        if: needs.changes.outputs.requirements_changed == 'true'
+        if: needs.changes.outputs.license_relevant_changed == 'true'
         run: |
           python -m venv .venv
           .venv/bin/pip install -r requirements.txt
 
       - name: Check THIRD_PARTY_LICENSES
-        if: needs.changes.outputs.requirements_changed == 'true'
+        if: needs.changes.outputs.license_relevant_changed == 'true'
         run: .venv/bin/python scripts/gen_licenses.py --check
