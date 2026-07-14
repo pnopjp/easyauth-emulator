@@ -349,11 +349,11 @@ For additional troubleshooting topics — including oauth2-proxy error diagnosis
 
 ## Remote Development
 
-The extension and the emulator run on the remote host in both cases.
+The extension and the emulator run on the remote host in all cases.
 
 ### Remote - SSH
 
-Works with the default settings. The gateway is reached via `http://localhost:<site.port>` through VS Code port forwarding.
+Works with the default settings. The gateway is reached the same way as when running locally.
 
 ### Remote - Tunnels
 
@@ -374,6 +374,14 @@ Dev tunnels allow at most 10 forwarded ports per tunnel, while VS Code automatic
   "4180-4189": { "onAutoForward": "ignore" }
 }
 ```
+
+### Dev Containers
+
+Works with the default settings. The gateway is reached the same way as when running locally.
+
+### WSL
+
+Works with the default settings. The gateway is reached the same way as when running locally.
 
 ---
 
