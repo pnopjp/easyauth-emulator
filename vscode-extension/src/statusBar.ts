@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-export type EmulatorState = 'stopped' | 'unconfigured' | 'missing_secret' | 'missing_entra_issuer' | 'starting' | 'running' | 'error';
+export type EmulatorState = 'stopped' | 'unconfigured' | 'missing_secret' | 'missing_entra_issuer' | 'custom_detection_failed' | 'starting' | 'running' | 'error';
 
 export class StatusBarManager implements vscode.Disposable {
     private readonly item: vscode.StatusBarItem;
@@ -34,6 +34,11 @@ export class StatusBarManager implements vscode.Disposable {
             case 'missing_entra_issuer':
                 this.item.text = '$(warning) EasyAuth: Entra issuer missing';
                 this.item.tooltip = 'EasyAuth Emulator: Microsoft Entra ID OIDC Issuer URL is not set. Click to open Entra settings.';
+                this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+                break;
+            case 'custom_detection_failed':
+                this.item.text = '$(warning) EasyAuth: port unknown';
+                this.item.tooltip = 'EasyAuth Emulator: custom port detection (easyauth.launchJsonPortKey / stdoutPortPattern) found no match. Click to enter the port manually.';
                 this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
                 break;
             case 'starting':

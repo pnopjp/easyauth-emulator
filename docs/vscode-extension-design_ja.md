@@ -105,6 +105,7 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 | `unconfigured` | 未設定 | VS Code 設定に IDP の clientId が設定されていない場合 |
 | `missing_secret` | シークレット未登録 | clientId は設定済みだが、クライアントシークレットが SecretStorage に登録されていない場合 |
 | `missing_entra_issuer` | Entra Issuer URL 未設定 | Entra の clientId とシークレットは設定済みだが、oidcIssuerUrl が空の場合（Entra のみ対象） |
+| `custom_detection_failed` | カスタム検出失敗 | `easyauth.launchJsonPortKey` / `easyauth.stdoutPortPattern` が設定されているが、どちらも一致しなかった場合（§6 参照） |
 | `starting` | 起動処理中 | `easyauth-emulator` を実行した直後 |
 | `running` | 正常稼働中 | stdout に `All processes started` を検出 |
 | `error` | 異常終了 | プロセスが非ゼロ終了コードで終了、またはタイムアウト |
@@ -194,18 +195,32 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 
 複数該当する場合は `launch.json` の `type` フィールドで補完する。
 
-### Steps 1〜6: ポート取得の優先順位
+### Steps 1〜7: ポート取得の優先順位
 
 以下の順で試み、取得できた時点で確定する。
 
 | 優先度 | 取得元 | 詳細 |
 | --- | --- | --- |
 | 1 | 拡張機能設定（手動指定） | `easyauth.upstreamPort`（null = 自動） |
-| 2 | `launch.json` | `env.PORT` / `env.ASPNETCORE_URLS` / `env.ASPNETCORE_HTTP_PORTS` / `applicationUrl` |
-| 3 | フレームワーク固有設定ファイル | 下表参照 |
-| 4 | stdout 解析 | デバッグ出力イベントをフレームワーク別パターンで解析（下表参照） |
-| 5 | ポートスキャン | 上記すべてで取得できない場合のフォールバック |
-| 6 | ユーザー確認 UI | スキャンで曖昧、またはスキャン起点が不明な場合 |
+| 2 | ユーザー指定検出方法 | `easyauth.launchJsonPortKey` / `easyauth.stdoutPortPattern`（下記参照） |
+| 3 | `launch.json`（標準キー） | `env.PORT` / `env.ASPNETCORE_URLS` / `env.ASPNETCORE_HTTP_PORTS` / `applicationUrl` |
+| 4 | フレームワーク固有設定ファイル | 下表参照 |
+| 5 | stdout 解析（標準パターン） | デバッグ出力イベントをフレームワーク別パターンで解析（下表参照） |
+| 6 | ポートスキャン | 上記すべてで取得できない場合のフォールバック |
+| 7 | ユーザー確認 UI | スキャンで曖昧、またはスキャン起点が不明な場合 |
+
+#### ユーザー指定検出方法（優先度 2）
+
+`easyauth.launchJsonPortKey` または `easyauth.stdoutPortPattern` のいずれかが設定されている場合、以下のみを試みる。**この優先度で解決できなければ、優先度 3〜7 の評価は一切行わず、状態は `custom_detection_failed` に遷移する**（§4・§10 参照）。ユーザーがポートの取得元を明示した以上、そこで取得できないことは設定ミスかアプリ未起動と判断し、無関係な手段で推測を続けない。
+
+| 設定 | 動作 |
+| --- | --- |
+| `easyauth.launchJsonPortKey` | `launch.json` の該当する構成に対し、指定したキー名を①`env`のキー → ②構成オブジェクト直下のフィールド（`applicationUrl`のようなURL文字列） → ③`args`配列内のフラグ名、の順で探す。同期的に即座に判定する |
+| `easyauth.stdoutPortPattern` | デバッグ出力に対して指定した正規表現（キャプチャグループ1つ）を試す。`easyauth.stdoutPatternTimeoutMs`（デフォルト 3000ms）まで待機する |
+
+両方設定されている場合は `launchJsonPortKey` を先に判定し、見つからなければ `stdoutPortPattern` の待機に移る。
+
+`custom_detection_failed` からの復帰は、ステータスバーのクリックによる手動ポート入力のみ（優先度3〜7のフォールバックは行わない）。
 
 #### 複数 URL・複数ポートがある場合の選択規則
 
@@ -216,7 +231,7 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 
 例: `https://localhost:7000;http://localhost:5000` → `5000` を採用
 
-#### フレームワーク固有設定ファイル（優先度 3）
+#### フレームワーク固有設定ファイル（優先度 4）
 
 | フレームワーク | ファイル | キー |
 | --- | --- | --- |
@@ -226,9 +241,9 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 | Streamlit | `.streamlit/config.toml` | `[server] port` |
 | Node.js / Python | `.env` | `PORT` |
 
-#### stdout 解析パターン（優先度 4）
+#### stdout 解析パターン（優先度 5）
 
-デバッグアダプターが OutputEvent を公開している場合に利用。公開していない場合はこのステップをスキップする。
+デバッグアダプターが OutputEvent を公開している場合に利用。公開していない場合はこのステップをスキップする。待機時間は `easyauth.stdoutPatternTimeoutMs`（デフォルト 3000ms、優先度2のカスタムパターンと共通の設定値）。
 
 | フレームワーク | 検出パターン（正規表現） |
 | --- | --- |
@@ -239,14 +254,14 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 | FastAPI / Uvicorn | `Uvicorn running on https?://[^:]+:(\d+)` |
 | Streamlit | `Local URL:\s*https?://[^:]+:(\d+)` |
 
-#### ポートスキャン仕様（優先度 5）
+#### ポートスキャン仕様（優先度 6）
 
-- **スキャン起点：** `easyauth.portScanBase`（`null` の場合はスキャンをスキップして優先度 6 へ）
+- **スキャン起点：** `easyauth.portScanBase`（`null` の場合はスキャンをスキップして優先度 7 へ）
 - **スキャン範囲：** 起点から `easyauth.portScanMax`（デフォルト: 5）ポート分
 - **方法：** 起点ポートから連続して TCP 接続を試み、応答があったポートを候補とする
-- **誤検知対策：** スキャン範囲を最大5ポートに絞ることで誤検知リスクを低減する。複数候補が残る場合はユーザー確認 UI（優先度 6）で解消する。
+- **誤検知対策：** スキャン範囲を最大5ポートに絞ることで誤検知リスクを低減する。複数候補が残る場合はユーザー確認 UI（優先度 7）で解消する。
 
-#### ユーザー確認 UI（優先度 6）
+#### ユーザー確認 UI（優先度 7）
 
 | 状況 | UI |
 | --- | --- |
@@ -265,6 +280,9 @@ VS Code UI（表示のみ）  ←通信→   VS Code 拡張機能ホスト
 | `easyauth.autoStart` | boolean | `true` | デバッグ開始時に自動起動 |
 | `easyauth.autoStop` | boolean | `true` | デバッグ終了時に自動停止 |
 | `easyauth.upstreamPort` | number \| null | `null` | ポート手動指定（null = 自動検知） |
+| `easyauth.launchJsonPortKey` | string | `""` | `launch.json` からポートを探すキー名（`env`・構成直下フィールド・`args`フラグの順に判定、優先度2、§6参照） |
+| `easyauth.stdoutPortPattern` | string | `""` | stdout解析用カスタム正規表現（優先度2、§6参照） |
+| `easyauth.stdoutPatternTimeoutMs` | number | `3000` | stdout解析の待機タイムアウト（ミリ秒。標準パターン・カスタムパターン共通） |
 | `easyauth.portScanMax` | number | `5` | ポートスキャンの最大試行数 |
 | `easyauth.portScanBase` | number \| null | `null` | スキャン起点（ヒントが取れない場合） |
 | `easyauth.verbose` | boolean | `false` | 起動時に全設定値を出力（シークレットはマスク） |
@@ -341,6 +359,7 @@ easyauth-emulator --app-upstream http://localhost:8081
 | `unconfigured` | `$(warning) EasyAuth: no config` | 拡張機能の設定画面を開く |
 | `missing_secret` | `$(lock) EasyAuth: secret missing`（黄色背景） | クライアントシークレット入力ポップアップを表示 |
 | `missing_entra_issuer` | `$(warning) EasyAuth: Entra issuer missing`（黄色背景） | ワークスペース設定の `easyauth.entra.oidcIssuerUrl` を開く |
+| `custom_detection_failed` | `$(warning) EasyAuth: port unknown`（黄色背景） | `showInputBox` でポート手入力 → 起動成功で `running` に戻る |
 | `starting` | `$(sync~spin) EasyAuth: starting...` | Output Channel を開く |
 | `running` | `$(shield) EasyAuth: 8080:8081`（リッスンポート:アップストリームポート） | ブラウザでエミュレーターを開く |
 | `error` | `$(error) EasyAuth: error` | 1回目: Output Channel を開く / 2回目以降: ポート検知して再起動 |

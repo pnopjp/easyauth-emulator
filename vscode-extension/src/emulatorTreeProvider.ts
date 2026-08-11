@@ -36,6 +36,7 @@ class EmulatorStatusItem extends vscode.TreeItem {
             case 'unconfigured':    return new vscode.ThemeIcon('warning');
             case 'missing_secret':       return new vscode.ThemeIcon('lock');
             case 'missing_entra_issuer': return new vscode.ThemeIcon('warning');
+            case 'custom_detection_failed': return new vscode.ThemeIcon('warning');
             default:                     return new vscode.ThemeIcon('shield');
         }
     }
@@ -48,6 +49,7 @@ class EmulatorStatusItem extends vscode.TreeItem {
             case 'unconfigured':    return 'not configured';
             case 'missing_secret':       return 'secret missing';
             case 'missing_entra_issuer': return 'Entra issuer missing';
+            case 'custom_detection_failed': return 'port unknown';
             default:                     return 'stopped';
         }
     }

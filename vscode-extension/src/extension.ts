@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import { EmulatorManager } from './emulatorManager';
-import { PortDetector } from './portDetector';
+import { PortDetector, CustomDetectionFailedError } from './portDetector';
 import { StatusBarManager } from './statusBar';
 import { SecretManager } from './secretManager';
 import { EmulatorTreeProvider, IdpInfo, IdpTreeItem } from './emulatorTreeProvider';
@@ -164,7 +164,16 @@ export function activate(context: vscode.ExtensionContext): void {
             if (emulator.isManaging()) return;
 
             portDetector.resetForNewSession();
-            const port = await portDetector.detect(session, context.workspaceState);
+            let port: number | null;
+            try {
+                port = await portDetector.detect(session, context.workspaceState);
+            } catch (err) {
+                if (err instanceof CustomDetectionFailedError) {
+                    emulator.notifyCustomDetectionFailed(err.detail);
+                    return;
+                }
+                throw err;
+            }
             if (port === null) return;
 
             outputShownSinceError = false;
@@ -199,6 +208,15 @@ export function activate(context: vscode.ExtensionContext): void {
                 case 'missing_entra_issuer':
                     await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', 'easyauth.entra.oidcIssuerUrl');
                     break;
+                case 'custom_detection_failed': {
+                    const port = await portDetector.promptManualPort();
+                    if (port !== null) {
+                        outputShownSinceError = false;
+                        const sessionId = vscode.debug.activeDebugSession?.id ?? '__manual__';
+                        await emulator.start(port, sessionId);
+                    }
+                    break;
+                }
                 case 'starting':
                     outputChannel.show();
                     break;

@@ -16,11 +16,21 @@ const STDOUT_PATTERNS: RegExp[] = [
     /Uvicorn running on https?:\/\/[^:]+:(\d+)/,
     /[Ll]istening on https?:\/\/[^:]+:(\d+)/,
     /Local URL:\s*https?:\/\/[^:]+:(\d+)/, // Streamlit
+    /Node\.js is listening to PORT:(\d+)/,
 ];
+
+/** Thrown when the user configured launchJsonPortKey/stdoutPortPattern but neither matched. */
+export class CustomDetectionFailedError extends Error {
+    constructor(public readonly detail: string) {
+        super(`Custom port detection configured but found no match (${detail})`);
+        this.name = 'CustomDetectionFailedError';
+    }
+}
 
 export class PortDetector {
     private stdoutPort: number | null = null;
     private portWaiters: Array<(port: number) => void> = [];
+    private textListeners: Array<(text: string) => void> = [];
 
     constructor(private readonly outputChannel: vscode.OutputChannel) {}
 
@@ -28,34 +38,34 @@ export class PortDetector {
         this.outputChannel.appendLine(message);
     }
 
-    /** Called for every terminal shell execution (VS Code 1.93+). */
-    onShellExecution(execution: vscode.TerminalShellExecution): void {
-        void (async () => {
-            for await (const data of execution.read()) {
-                const port = this.extractPortFromText(data);
-                if (port !== null && this.stdoutPort === null) {
-                    this.stdoutPort = port;
-                    const waiters = this.portWaiters.splice(0);
-                    for (const resolve of waiters) resolve(port);
-                    return;
-                }
-            }
-        })();
-    }
-
-    /** Called by the DebugAdapterTracker for every output event. */
-    onDebugOutput(text: string): void {
+    private feed(text: string): void {
         const port = this.extractPortFromText(text);
         if (port !== null && this.stdoutPort === null) {
             this.stdoutPort = port;
             const waiters = this.portWaiters.splice(0);
             for (const resolve of waiters) resolve(port);
         }
+        for (const listener of this.textListeners) listener(text);
+    }
+
+    /** Called for every terminal shell execution (VS Code 1.93+). */
+    onShellExecution(execution: vscode.TerminalShellExecution): void {
+        void (async () => {
+            for await (const data of execution.read()) {
+                this.feed(data);
+            }
+        })();
+    }
+
+    /** Called by the DebugAdapterTracker for every output event. */
+    onDebugOutput(text: string): void {
+        this.feed(text);
     }
 
     resetForNewSession(): void {
         this.stdoutPort = null;
         this.portWaiters = [];
+        this.textListeners = [];
     }
 
     async detect(session: vscode.DebugSession, workspaceState: vscode.Memento): Promise<number | null> {
@@ -69,38 +79,55 @@ export class PortDetector {
             return manual;
         }
 
-        // Step 2: launch.json
+        // Step 2: user-specified detection (launchJsonPortKey / stdoutPortPattern).
+        // If either is configured, only these are tried — a non-match throws instead
+        // of falling through to the built-in steps below.
+        const customKey = config.get<string>('launchJsonPortKey', '').trim();
+        const customPatternStr = config.get<string>('stdoutPortPattern', '').trim();
+        if (customKey || customPatternStr) {
+            const customPort = await this.fromCustomDetection(session, customKey, customPatternStr, config);
+            if (customPort !== null) return customPort;
+            const detail = [
+                customKey ? `launchJsonPortKey=${customKey}` : null,
+                customPatternStr ? `stdoutPortPattern=${customPatternStr}` : null,
+            ].filter(Boolean).join(', ');
+            this.log(`[portDetector] Step 2: custom detection configured but found no match (${detail})`);
+            throw new CustomDetectionFailedError(detail);
+        }
+
+        // Step 3: launch.json
         const launchPort = this.fromLaunchJson(session);
 
-        // Step 3: framework config file
+        // Step 4: framework config file
         const framework = root ? this.detectFramework(root, workspaceState) : 'unknown';
         const configPort = root ? this.fromConfigFile(root, framework) : null;
 
         if (launchPort !== null) {
-            this.log(`[portDetector] Step 2: detected port ${launchPort} from launch.json`);
+            this.log(`[portDetector] Step 3: detected port ${launchPort} from launch.json`);
             return launchPort;
         }
         if (configPort !== null) {
-            this.log(`[portDetector] Step 3: detected port ${configPort} from ${framework} config file`);
+            this.log(`[portDetector] Step 4: detected port ${configPort} from ${framework} config file`);
             return configPort;
         }
 
-        // Step 4: stdout (wait up to 3 s)
-        this.log('[portDetector] Step 4: waiting for port in debug output...');
-        const stdoutPort = await this.waitForStdoutPort(3_000);
+        // Step 5: stdout (built-in patterns)
+        const stdoutTimeoutMs = config.get<number>('stdoutPatternTimeoutMs', 3_000);
+        this.log(`[portDetector] Step 5: waiting up to ${stdoutTimeoutMs}ms for port in debug output...`);
+        const stdoutPort = await this.waitForStdoutPort(stdoutTimeoutMs);
         if (stdoutPort !== null) {
-            this.log(`[portDetector] Step 4: detected port ${stdoutPort} from stdout`);
+            this.log(`[portDetector] Step 5: detected port ${stdoutPort} from stdout`);
             return stdoutPort;
         }
 
-        // Step 5: port scan
+        // Step 6: port scan
         const hint = config.get<number | null>('portScanBase', null);
         if (hint !== null) {
-            this.log(`[portDetector] Step 5: scanning ports from ${hint}`);
+            this.log(`[portDetector] Step 6: scanning ports from ${hint}`);
             const max = config.get<number>('portScanMax', 5);
             const candidates = await this.scan(hint, max);
             if (candidates.length === 1) {
-                this.log(`[portDetector] Step 5: found port ${candidates[0]} via scan`);
+                this.log(`[portDetector] Step 6: found port ${candidates[0]} via scan`);
                 return candidates[0];
             }
             if (candidates.length > 1) return this.pickFromList(candidates);
@@ -110,20 +137,107 @@ export class PortDetector {
             // Express/Next.js:3000). Exclude the emulator's own port to avoid self-detection.
             const emulatorPort = config.get<number>('site.port', 8080);
             const wellKnown = [3000, 5000, 7071, 8000, 8080].filter(p => p !== emulatorPort);
-            this.log(`[portDetector] Step 5: scanning well-known ports ${wellKnown.join(', ')} (excluding emulator port ${emulatorPort})`);
+            this.log(`[portDetector] Step 6: scanning well-known ports ${wellKnown.join(', ')} (excluding emulator port ${emulatorPort})`);
             const candidates: number[] = [];
             for (const p of wellKnown) {
                 if (await this.isListening(p)) candidates.push(p);
             }
             if (candidates.length === 1) {
-                this.log(`[portDetector] Step 5: found port ${candidates[0]}`);
+                this.log(`[portDetector] Step 6: found port ${candidates[0]}`);
                 return candidates[0];
             }
             if (candidates.length > 1) return this.pickFromList(candidates);
         }
 
-        // Step 6: manual input
+        // Step 7: manual input
         return this.promptInput();
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Step 2: user-specified detection
+    // ------------------------------------------------------------------ //
+    private async fromCustomDetection(
+        session: vscode.DebugSession,
+        key: string,
+        patternStr: string,
+        config: vscode.WorkspaceConfiguration,
+    ): Promise<number | null> {
+        if (key) {
+            const port = this.fromCustomLaunchJsonKey(session, key);
+            if (port !== null) {
+                this.log(`[portDetector] Step 2: detected port ${port} from custom launch.json key`);
+                return port;
+            }
+        }
+        if (patternStr) {
+            let pattern: RegExp;
+            try {
+                pattern = new RegExp(patternStr);
+            } catch (err) {
+                this.log(`[portDetector] Step 2: invalid easyauth.stdoutPortPattern: ${err}`);
+                return null;
+            }
+            const timeoutMs = config.get<number>('stdoutPatternTimeoutMs', 3_000);
+            this.log(`[portDetector] Step 2: waiting up to ${timeoutMs}ms for custom stdout pattern...`);
+            const port = await this.waitForCustomStdoutPort(pattern, timeoutMs);
+            if (port !== null) {
+                this.log(`[portDetector] Step 2: detected port ${port} from custom stdout pattern`);
+                return port;
+            }
+        }
+        return null;
+    }
+
+    // Probes the same three locations the built-in detection reads from — env →
+    // top-level config field → args flag — in that order, for the one given key.
+    private fromCustomLaunchJsonKey(session: vscode.DebugSession, key: string): number | null {
+        return this.forEachMatchingLaunchConfig(session, cfg => {
+            const env = (cfg['env'] ?? {}) as Record<string, string>;
+
+            const envValue = env[key];
+            if (envValue) {
+                const n = parseInt(envValue, 10);
+                if (!isNaN(n)) return n;
+                const p = this.portFromUrlList(envValue);
+                if (p !== null) return p;
+            }
+
+            if (typeof cfg[key] === 'string') {
+                const p = this.portFromUrlList(cfg[key] as string);
+                if (p !== null) return p;
+            }
+
+            const args = Array.isArray(cfg['args']) ? (cfg['args'] as unknown[]).map(String) : [];
+            for (let i = 0; i < args.length - 1; i++) {
+                if (args[i] !== key) continue;
+                const m = args[i + 1].match(/:?(\d+)$/);
+                if (m) {
+                    const n = parseInt(m[1], 10);
+                    if (!isNaN(n)) return n;
+                }
+            }
+            return null;
+        });
+    }
+
+    private waitForCustomStdoutPort(pattern: RegExp, timeoutMs: number): Promise<number | null> {
+        return new Promise<number | null>((resolve) => {
+            const timer = setTimeout(() => {
+                this.textListeners = this.textListeners.filter(l => l !== onText);
+                resolve(null);
+            }, timeoutMs);
+
+            const onText = (text: string): void => {
+                const m = text.match(pattern);
+                const n = m ? parseInt(m[1], 10) : NaN;
+                if (!isNaN(n)) {
+                    clearTimeout(timer);
+                    this.textListeners = this.textListeners.filter(l => l !== onText);
+                    resolve(n);
+                }
+            };
+            this.textListeners.push(onText);
+        });
     }
 
     // Used when started via command palette (no debug session)
@@ -143,9 +257,17 @@ export class PortDetector {
     }
 
     // ------------------------------------------------------------------ //
-    //  Step 2: launch.json
+    //  Step 3: launch.json
     // ------------------------------------------------------------------ //
     private fromLaunchJson(session: vscode.DebugSession): number | null {
+        return this.forEachMatchingLaunchConfig(session, cfg => this.portFromLaunchConfig(cfg));
+    }
+
+    /** Reads .vscode/launch.json and runs `extract` over each configuration matching the session. */
+    private forEachMatchingLaunchConfig(
+        session: vscode.DebugSession,
+        extract: (cfg: Record<string, unknown>) => number | null,
+    ): number | null {
         for (const folder of vscode.workspace.workspaceFolders ?? []) {
             const p = path.join(folder.uri.fsPath, '.vscode', 'launch.json');
             if (!fs.existsSync(p)) continue;
@@ -157,7 +279,7 @@ export class PortDetector {
                 for (const cfg of (json.configurations ?? []) as Record<string, unknown>[]) {
                     // Match by name when multiple configs exist
                     if ((json.configurations?.length ?? 0) > 1 && cfg['name'] !== session.name) continue;
-                    const port = this.portFromLaunchConfig(cfg);
+                    const port = extract(cfg);
                     if (port !== null) return port;
                 }
             } catch { /* ignore */ }
@@ -257,7 +379,7 @@ export class PortDetector {
     }
 
     // ------------------------------------------------------------------ //
-    //  Step 3: framework config file
+    //  Step 4: framework config file
     // ------------------------------------------------------------------ //
     private fromConfigFile(root: string, framework: Framework): number | null {
         try {
@@ -325,7 +447,7 @@ export class PortDetector {
     }
 
     // ------------------------------------------------------------------ //
-    //  Step 4: stdout
+    //  Step 5: stdout
     // ------------------------------------------------------------------ //
     private extractPortFromText(text: string): number | null {
         for (const re of STDOUT_PATTERNS) {
@@ -352,7 +474,7 @@ export class PortDetector {
     }
 
     // ------------------------------------------------------------------ //
-    //  Step 5: port scan
+    //  Step 6: port scan
     // ------------------------------------------------------------------ //
     private async scan(basePort: number, maxPorts: number): Promise<number[]> {
         const results: number[] = [];
@@ -374,7 +496,7 @@ export class PortDetector {
     }
 
     // ------------------------------------------------------------------ //
-    //  Step 6: UI
+    //  Step 7: UI
     // ------------------------------------------------------------------ //
     private async pickFromList(ports: number[]): Promise<number | null> {
         const pick = await vscode.window.showQuickPick(
@@ -395,5 +517,10 @@ export class PortDetector {
             },
         });
         return value ? parseInt(value, 10) : null;
+    }
+
+    /** Public entry point for the "custom detection failed" retry flow (§6 Step 7 UI, no fallback chain). */
+    async promptManualPort(): Promise<number | null> {
+        return this.promptInput();
     }
 }
