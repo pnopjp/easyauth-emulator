@@ -42,11 +42,30 @@ Develop locally with an authentication model compatible with production Azure Ap
 - `GET /.auth/login`
 - `GET /.auth/login/<idp>`
   - e.g. `GET /.auth/login/aad`
+- `POST /.auth/login/<idp>` _(client-directed sign-in — see below)_
+  - e.g. `POST /.auth/login/aad`
 - `GET /.auth/logout`
 - `GET /.auth/refresh` _(stub implementation — returns 200 if authenticated, 401 if not; no token refresh is performed)_
 - `GET /.auth/login/select` _(emulator only — not part of Azure Easy Auth)_
 
 Any `/.auth/*` endpoint not listed above returns 404.
+
+### Client-directed sign-in and X-ZUMO-AUTH
+
+For non-browser clients, `POST /.auth/login/<idp>` accepts a provider access
+token instead of the browser redirect flow: `{"access_token": "<token>"}`
+(missing → `400`). On success it returns `{"authenticationToken": "...",
+"user": {"userId": "..."}}` — present that value on later requests via an
+`X-ZUMO-AUTH: <authenticationToken>` header in place of the session cookie,
+on both `/.auth/me` and any protected route. `X-ZUMO-AUTH` takes precedence
+over `Cookie` when both are present, and an invalid one always gets a bare
+`401` (never the redirect-to-login a missing/invalid cookie gets). Only
+OIDC-backed providers (`entra`, `google`, `apple`, generic `oidc`/
+`openid-connect`) support this — `facebook`/`github` do not (matching real
+Azure, which doesn't support client-directed sign-in for GitHub at all).
+The returned `authenticationToken` is the same opaque value as the input
+`access_token` — an emulator-only simplification; it is not interchangeable
+with an `AppServiceAuthSession` cookie value.
 
 ## Injected Headers
 

@@ -426,6 +426,14 @@ def _process_idp(env: dict, idp: str, port: int,
             args.append(f"--prompt={prompt}")
         if code_challenge_method:
             args.append(f"--code-challenge-method={code_challenge_method}")
+        # Lets oauth2-proxy's own /oauth2/auth validate an Authorization:
+        # Bearer <jwt> request directly against this issuer's JWKS (signature,
+        # expiry, issuer, audience) with no session cookie involved — this is
+        # how app.py's _check_auth(bearer_token=...) validates the access_token
+        # from Easy Auth's client-directed sign-in flow (X-ZUMO-AUTH) without
+        # needing any JWT-signature-verification code of its own.
+        args.append("--skip-jwt-bearer-tokens=true")
+        args.append(f"--extra-jwt-issuers={issuer_url}={client_id}")
 
     extra_args_raw = _get(env, f"{pfx}_EXTRA_ARGS", "")
     if extra_args_raw.strip():
