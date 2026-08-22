@@ -167,27 +167,32 @@ this folder's `app.py` it can't be zip-deployed with no build step. Package it s
 from `src/` when comparing against real Azure — don't keep a copy in this folder (`src/`
 is the source of truth).
 
+Disposable build artifacts (the staging folder and the zip) are created inside this
+PoC folder, not the repo root — `.gitignore` already excludes
+`tools/azure-poc/*/deploy-*/` and `tools/azure-poc/*/*.zip`.
+
 ```powershell
 $rg = "<rg>"
 $appName = "<app-name>"
+$pocDir = "tools\azure-poc\azure-zumo-auth-poc"
 
-New-Item -ItemType Directory -Force -Path deploy-sample-app | Out-Null
-Copy-Item src\sample_app.py deploy-sample-app\
-Copy-Item src\_sample_app_shared.py deploy-sample-app\
-"h2==4.3.0" | Out-File -Encoding utf8 deploy-sample-app\requirements.txt
+New-Item -ItemType Directory -Force -Path "$pocDir\deploy-sample-app" | Out-Null
+Copy-Item src\sample_app.py "$pocDir\deploy-sample-app\"
+Copy-Item src\_sample_app_shared.py "$pocDir\deploy-sample-app\"
+"h2==4.3.0" | Out-File -Encoding utf8 "$pocDir\deploy-sample-app\requirements.txt"
 
 # Set the build-trigger setting BEFORE the first zip deploy (see gotchas below)
 az webapp config appsettings set --resource-group $rg --name $appName `
   --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true SAMPLE_APP_PORT=8000
 
-Compress-Archive -Path deploy-sample-app\* -DestinationPath sample-app.zip -Force
-az webapp deploy --resource-group $rg --name $appName --src-path sample-app.zip --type zip
+Compress-Archive -Path "$pocDir\deploy-sample-app\*" -DestinationPath "$pocDir\sample-app.zip" -Force
+az webapp deploy --resource-group $rg --name $appName --src-path "$pocDir\sample-app.zip" --type zip
 az webapp config set --resource-group $rg --name $appName --startup-file "python sample_app.py"
 az webapp restart --resource-group $rg --name $appName
 ```
 
 `deploy-sample-app/` and `sample-app.zip` are disposable local build artifacts — delete
-them after deploying.
+them after deploying (though `.gitignore` keeps them out of `git status` either way).
 
 ### Gotchas
 

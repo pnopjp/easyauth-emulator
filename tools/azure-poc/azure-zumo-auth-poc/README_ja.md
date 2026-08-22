@@ -169,28 +169,33 @@ curl -s -i https://<app-name>.azurewebsites.net/ \
 フォルダの`app.py`と違い単純な依存パッケージ無しzipデプロイでは動かない。実機比較する
 場合は`src/`から直接パッケージすること(このフォルダにコピーは置かない — `src/`が正本)。
 
+使い捨てのビルド物(ステージング用フォルダとzip)はリポジトリ直下ではなく、この
+PoCフォルダの中に作る。`.gitignore`側で`tools/azure-poc/*/deploy-*/`と
+`tools/azure-poc/*/*.zip`を既に除外済み。
+
 ```powershell
 $rg = "<rg>"
 $appName = "<app-name>"
+$pocDir = "tools\azure-poc\azure-zumo-auth-poc"
 
-New-Item -ItemType Directory -Force -Path deploy-sample-app | Out-Null
-Copy-Item src\sample_app.py deploy-sample-app\
-Copy-Item src\_sample_app_shared.py deploy-sample-app\
-"h2==4.3.0" | Out-File -Encoding utf8 deploy-sample-app\requirements.txt
+New-Item -ItemType Directory -Force -Path "$pocDir\deploy-sample-app" | Out-Null
+Copy-Item src\sample_app.py "$pocDir\deploy-sample-app\"
+Copy-Item src\_sample_app_shared.py "$pocDir\deploy-sample-app\"
+"h2==4.3.0" | Out-File -Encoding utf8 "$pocDir\deploy-sample-app\requirements.txt"
 
 # ビルドを走らせる設定は、最初のzipデプロイより前に設定しておくこと(下記の
 # ハマりポイント参照)
 az webapp config appsettings set --resource-group $rg --name $appName `
   --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true SAMPLE_APP_PORT=8000
 
-Compress-Archive -Path deploy-sample-app\* -DestinationPath sample-app.zip -Force
-az webapp deploy --resource-group $rg --name $appName --src-path sample-app.zip --type zip
+Compress-Archive -Path "$pocDir\deploy-sample-app\*" -DestinationPath "$pocDir\sample-app.zip" -Force
+az webapp deploy --resource-group $rg --name $appName --src-path "$pocDir\sample-app.zip" --type zip
 az webapp config set --resource-group $rg --name $appName --startup-file "python sample_app.py"
 az webapp restart --resource-group $rg --name $appName
 ```
 
 デプロイ後、`deploy-sample-app/`と`sample-app.zip`はローカルの使い捨てビルド物なので
-削除してよい。
+削除してよい(`.gitignore`で除外済みなので、消さなくても`git status`は汚れない)。
 
 ### ハマったポイント
 

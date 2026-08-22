@@ -11,3 +11,5 @@ venv/
 .venv/
 ToDo.md
 tools/azure-poc/azure-websocket-poc/vendor/
+tools/azure-poc/*/deploy-*/
+tools/azure-poc/*/*.zip
