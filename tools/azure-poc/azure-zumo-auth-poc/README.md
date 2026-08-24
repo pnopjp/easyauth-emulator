@@ -157,7 +157,7 @@ curl -s -i https://<app-name>.azurewebsites.net/ \
 Q1-Q6 above were verified with this folder's minimal echo backend (`app.py`). Afterward,
 `src/sample_app.py` (the emulator's own verification/demo app) was deployed to the same
 App Service, and the resulting `X-ZUMO-AUTH` support implementation
-(`_handle_client_directed_login`, `_check_auth_via_zumo`) was run locally against the
+(`_handle_client_directed_login`, `_check_auth_via_bearer_token`) was run locally against the
 same AAD test app credentials, comparing `/api/session` output. Result: matching
 (`X-MS-CLIENT-PRINCIPAL-ID`, `X-MS-CLIENT-PRINCIPAL-IDP: aad`, etc. were injected in the
 same shape on both real Azure and the local emulator).

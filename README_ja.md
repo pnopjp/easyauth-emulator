@@ -42,30 +42,19 @@ graph LR
 - `GET /.auth/login`
 - `GET /.auth/login/<idp>`
   - 例\) `GET /.auth/login/aad`
-- `POST /.auth/login/<idp>` _（クライアント主導ログイン — 下記参照）_
-  - 例\) `POST /.auth/login/aad`
+- `POST /.auth/login/<idp>` _（クライアント主導ログイン）_
 - `GET /.auth/logout`
 - `GET /.auth/refresh` _（互換性のためのダミー実装 — 認証済みは 200 OK、未認証は 401 を返す。トークン更新は行わない）_
 - `GET /.auth/login/select` _（エミュレーター独自実装 — Azure Easy Auth には存在しない）_
 
 上記以外の `/.auth/*` エンドポイントは 404 を返します。
 
-### クライアント主導ログインと X-ZUMO-AUTH
+## 認証ヘッダー
 
-非ブラウザクライアント向けに、`POST /.auth/login/<idp>` はブラウザリダイレクト
-フローの代わりにプロバイダーのaccess_tokenを受け付けます:
-`{"access_token": "<token>"}`（無い場合は`400`）。成功すると
-`{"authenticationToken": "...", "user": {"userId": "..."}}` が返るので、以降の
-リクエストではセッションCookieの代わりに`X-ZUMO-AUTH: <authenticationToken>`
-ヘッダーを付けます（`/.auth/me`・保護ルートいずれでも有効）。`Cookie`と
-`X-ZUMO-AUTH`が両方存在する場合は`X-ZUMO-AUTH`が優先され、不正な値は常に
-`401`を直接返します（Cookie未認証時のようなログインページへのリダイレクトには
-なりません）。対応するのはOIDCベースのプロバイダー(`entra`・`google`・
-`apple`・汎用`oidc`/`openid-connect`)のみで、`facebook`/`github`は非対応です
-（実機Azureでも`github`はクライアント主導ログイン自体が非対応のため、この点は
-実機と一致しています）。返される`authenticationToken`は入力の`access_token`
-そのものです（エミュレーター独自の簡略化。`AppServiceAuthSession`Cookieの値
-とは相互運用できません）。
+`Cookie` に加えて、次のヘッダーでも認証できます:
+
+- `Authorization: Bearer <token>`
+- `X-ZUMO-AUTH`
 
 ## 注入されるヘッダー
 

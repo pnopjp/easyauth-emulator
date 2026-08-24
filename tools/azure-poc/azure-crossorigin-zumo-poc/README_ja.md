@@ -5,16 +5,21 @@
 実際に繋ぎ、「Easy Auth保護下のApp Serviceで配信されたページのJSが、別オリジンの
 Functions APIを呼ぶ」という実際のアーキテクチャパターンをブラウザで動かして確認する。
 
-`app.py`は1ページだけのHTML+JSを返す最小サーバー。ページ内のJSは:
+`app.py`は1ページだけのHTML+JSを返す最小サーバー。いずれもまず`GET /.auth/me`
+(同一オリジン、Cookieは自動送信)でこのApp Service自身のトークンストアから
+`access_token`を取得したうえで、2つのボタンで別々の経路を試せる。
 
-1. `GET /.auth/me`(同一オリジン、Cookieは自動送信)でこのApp Service自身の
-   トークンストアから`access_token`を取得
-2. その`access_token`を**別オリジンの**Functions Appの`POST /.auth/login/aad`に
-   渡してクライアント主導ログインし、Functions側の`authenticationToken`を取得
-3. Functions Appの`GET /api/session`を`X-ZUMO-AUTH: <authenticationToken>`付きで
-   呼ぶ(Cookieはオリジンをまたがないため使えない)
+- **Run (X-ZUMO-AUTH)**: その`access_token`を**別オリジンの**Functions Appの
+  `POST /.auth/login/aad`に渡してクライアント主導ログインし、Functions側の
+  `authenticationToken`を取得してから、`GET /api/session`を
+  `X-ZUMO-AUTH: <authenticationToken>`付きで呼ぶ(Cookieはオリジンをまたがない
+  ため使えない)
+- **Run (Authorization: Bearer)**: `/.auth/login/aad`のラウンドトリップを経由せず、
+  `access_token`をそのまま`Authorization: Bearer`ヘッダーで`GET /api/session`に
+  渡す(Microsoft公式ドキュメントの「daemon client application(service-to-
+  service呼び出し)」パターン)
 
-## 状態: 検証完了(C1〜C7確定。C4は新規発見、C5でその回避策と本人一致を確認、C6・C7でローカルEmulatorをFunctions役・App Service役それぞれにしても同じ流れが成功することを確認)
+## 状態: 検証完了(C1〜C8確定。C4は新規発見、C5でその回避策と本人一致を確認、C6・C7でローカルEmulatorをFunctions役・App Service役それぞれにしても同じ流れが成功することを確認、C8で`Authorization: Bearer`直接呼び出しも成功することを確認)
 
 - **C1・C2(確定、2026-08-24)**: `az functionapp cors add`でApp Serviceのオリジンを
   許可するだけで、`/.auth/login/aad`(POST)・`/api/session`(GET)ともにクロスオリジン
@@ -99,13 +104,24 @@ az functionapp cors add --resource-group $rg --name $funcAppName `
 ## テスト
 
 1. ブラウザで`https://<app-name>.azurewebsites.net/`を開き、Easy Authでサインインする
-2. 表示された入力欄に`https://<func-app-name>.azurewebsites.net`を入力し、**Run**を押す
-3. ページ上に各ステップのHTTPステータスと結果が表示される。ブラウザの開発者ツール
-   (Network/Consoleタブ)でCORSエラーが出ていないかも確認する
+2. 表示された入力欄に`https://<func-app-name>.azurewebsites.net`を入力する
+3. **Run (X-ZUMO-AUTH)**を押す(C1〜C7で確認済みの経路)。ページ上に各ステップの
+   HTTPステータスと結果が表示される。ブラウザの開発者ツール(Network/Consoleタブ)で
+   CORSエラーが出ていないかも確認する
+4. **Run (Authorization: Bearer)**も押してみる(C8、`/.auth/login/aad`を経由せず
+   `Authorization: Bearer <access_token>`を直接`/api/session`に渡す経路)
 
 C1・C2でCORSエラーになった場合、`az functionapp cors add`だけでは`/.auth/*`ルートに
 効かない可能性がある。その場合はエラー内容(devtoolsのConsoleに出るCORSエラーメッセージ)
 を確認し、対処法を検討する。
+
+### C8(確定、2026-08-26): Authorization: Bearer での直接呼び出し
+
+公式ドキュメントの「daemon client application」の記載通り、`/.auth/login/<idp>`を
+経由せず、`Authorization: Bearer <access_token>`を保護ルートに直接付けるだけで
+認証されることを実機で確認した。クライアント主導ログイン(`X-ZUMO-AUTH`)は必須では
+なく、標準的なOAuth2の`Authorization`ヘッダーでも同じ結果が得られる、別の(より
+単純な)経路として実機で成立している。
 
 ## 結果の記録
 

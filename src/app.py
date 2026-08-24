@@ -805,12 +805,30 @@ class _RoutingMixin:
             return IDP_LIST[0]
         return ""
 
-    def _check_auth_via_zumo(self, zumo_token: str) -> "tuple[str, dict[str, str]] | None":
-        """X-ZUMO-AUTH carries no idp hint (unlike /.auth/login/<idp>'s path),
-        so try the idp the request otherwise looks like it belongs to first
-        (cheap, the common case), then fall back to every configured idp in
-        order (IDP_LIST is already deterministic) until one's oauth2-proxy
-        validates the token. Returns (idp, auth_result) on success."""
+    def _bearer_token_from_request(self) -> str:
+        """X-ZUMO-AUTH (Easy Auth's own client-directed-flow header) takes
+        precedence when present; otherwise a plain standard
+        Authorization: Bearer header is honored too — confirmed against real
+        Azure as a separate, simpler path that skips /.auth/login/<idp>
+        entirely (the "daemon client application" / service-to-service
+        pattern from Microsoft's own docs; see
+        tools/azure-poc/azure-crossorigin-zumo-poc's C8). Returns "" if
+        neither is present."""
+        zumo = self._header("X-ZUMO-AUTH")
+        if zumo:
+            return zumo
+        auth_header = self._header("Authorization")
+        if auth_header.lower().startswith("bearer "):
+            return auth_header[7:].strip()
+        return ""
+
+    def _check_auth_via_bearer_token(self, bearer_token: str) -> "tuple[str, dict[str, str]] | None":
+        """Neither X-ZUMO-AUTH nor Authorization: Bearer carries an idp hint
+        (unlike /.auth/login/<idp>'s path), so try the idp the request
+        otherwise looks like it belongs to first (cheap, the common case),
+        then fall back to every configured idp in order (IDP_LIST is already
+        deterministic) until one's oauth2-proxy validates the token. Returns
+        (idp, auth_result) on success."""
         candidates = [i for i in (self._current_idp(),) if i] + [i for i in IDP_LIST]
         tried: set[str] = set()
         for idp in candidates:
@@ -820,7 +838,7 @@ class _RoutingMixin:
             auth_result = _check_auth(
                 idp,
                 cookie="",
-                bearer_token=zumo_token,
+                bearer_token=bearer_token,
                 real_ip=self._client_ip(),
                 proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
                 host=self._header("Host"),
@@ -1005,9 +1023,9 @@ class _RoutingMixin:
     # --- Route handlers ---
 
     def _handle_auth_me(self) -> None:
-        zumo = self._header("X-ZUMO-AUTH")
-        if zumo:
-            matched = self._check_auth_via_zumo(zumo)
+        bearer = self._bearer_token_from_request()
+        if bearer:
+            matched = self._check_auth_via_bearer_token(bearer)
             if not matched:
                 self._send_json([])
                 return
@@ -1336,14 +1354,16 @@ class _RoutingMixin:
                     self._proxy_to(APP_UPSTREAM, strip_headers=_AUTH_HEADERS_TO_STRIP)
                 return
 
-        zumo = self._header("X-ZUMO-AUTH")
-        if zumo:
-            # X-ZUMO-AUTH takes precedence over Cookie when both are present,
-            # and an invalid one always gets a bare 401 — never the
-            # redirect-to-login behavior _deny_unauthenticated() gives an
-            # invalid/missing Cookie (confirmed against real Azure, see
-            # tools/azure-poc/azure-zumo-auth-poc).
-            matched = self._check_auth_via_zumo(zumo)
+        bearer = self._bearer_token_from_request()
+        if bearer:
+            # X-ZUMO-AUTH / Authorization: Bearer take precedence over Cookie
+            # when both are present, and an invalid one always gets a bare
+            # 401 — never the redirect-to-login behavior
+            # _deny_unauthenticated() gives an invalid/missing Cookie
+            # (confirmed against real Azure, see
+            # tools/azure-poc/azure-zumo-auth-poc and
+            # tools/azure-poc/azure-crossorigin-zumo-poc's C8).
+            matched = self._check_auth_via_bearer_token(bearer)
             if not matched:
                 self._send_empty(401)
                 return

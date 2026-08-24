@@ -160,7 +160,7 @@ curl -s -i https://<app-name>.azurewebsites.net/ \
 
 上記のQ1〜Q6はこのフォルダの最小エコーバックエンド(`app.py`)で検証したが、その後
 `src/sample_app.py`(エミュレータの動作確認用アプリ)を同じApp Serviceにデプロイし、
-実装した`X-ZUMO-AUTH`対応(`_handle_client_directed_login`・`_check_auth_via_zumo`)を
+実装した`X-ZUMO-AUTH`対応(`_handle_client_directed_login`・`_check_auth_via_bearer_token`)を
 ローカルのエミュレータで同じAADテストアプリの資格情報を使って動かし、`/api/session`の
 出力を比較した。結果は一致(`X-MS-CLIENT-PRINCIPAL-ID`・`X-MS-CLIENT-PRINCIPAL-IDP: aad`
 等が実機・ローカルどちらも同じ形で注入された)。

@@ -6,18 +6,21 @@ PoC wires the two together to exercise the real architecture pattern: a browser 
 client served from an Easy-Auth-protected App Service calling a *different-origin*
 Functions API.
 
-`app.py` is a minimal single-page HTML+JS server. The page's JS:
+`app.py` is a minimal single-page HTML+JS server. Both buttons start the same way —
+`GET /.auth/me` (same origin, cookie sent automatically) to read the `access_token`
+Easy Auth already put in this App Service's own token store — then diverge:
 
-1. `GET /.auth/me` (same origin, cookie sent automatically) to read the
-   `access_token` Easy Auth already put in this App Service's own token store.
-2. POSTs that `access_token` to a **different-origin** Functions app's
-   `POST /.auth/login/aad` (client-directed sign-in) to get that app's own
-   `authenticationToken`.
-3. Calls that Functions app's `GET /api/session` with
-   `X-ZUMO-AUTH: <authenticationToken>` — a cookie can't cross origins, so this is
-   the only option.
+- **Run (X-ZUMO-AUTH)**: POSTs that `access_token` to a **different-origin**
+  Functions app's `POST /.auth/login/aad` (client-directed sign-in) to get that
+  app's own `authenticationToken`, then calls `GET /api/session` with
+  `X-ZUMO-AUTH: <authenticationToken>` — a cookie can't cross origins, so this is
+  the only option for that path.
+- **Run (Authorization: Bearer)**: skips the `/.auth/login/aad` round trip entirely
+  and presents the `access_token` directly to `GET /api/session` via a plain
+  `Authorization: Bearer` header — the "daemon client application"
+  (service-to-service) pattern from Microsoft's own docs.
 
-## Status: verification complete (C1-C7 confirmed — C4 is a new finding, C5 confirms the workaround and identity match, C6/C7 confirm the same round trip with a local Emulator instance in either the Functions or App Service role)
+## Status: verification complete (C1-C8 confirmed — C4 is a new finding, C5 confirms the workaround and identity match, C6/C7 confirm the same round trip with a local Emulator instance in either the Functions or App Service role, C8 confirms direct `Authorization: Bearer` also works)
 
 - **C1/C2 (confirmed, 2026-08-24)**: `az functionapp cors add` for the App Service's
   origin was enough — both `POST /.auth/login/aad` and `GET /api/session` succeeded
@@ -116,14 +119,25 @@ az functionapp cors add --resource-group $rg --name $funcAppName `
 
 1. Open `https://<app-name>.azurewebsites.net/` in a browser and sign in through
    Easy Auth.
-2. Enter `https://<func-app-name>.azurewebsites.net` in the input field and click
-   **Run**.
-3. The page shows each step's HTTP status and result. Also check the browser
-   devtools Network/Console tabs for CORS errors.
+2. Enter `https://<func-app-name>.azurewebsites.net` in the input field.
+3. Click **Run (X-ZUMO-AUTH)** (the path already confirmed in C1-C7). The page
+   shows each step's HTTP status and result. Also check the browser devtools
+   Network/Console tabs for CORS errors.
+4. Also click **Run (Authorization: Bearer)** (C8 — presents the access_token
+   directly to `/api/session` without the `/.auth/login/aad` round trip).
 
 If C1/C2 fail with a CORS error, `az functionapp cors add` alone may not cover
 `/.auth/*` routes. Check the exact CORS error message in devtools and work from
 there.
+
+### C8 (confirmed, 2026-08-26): direct call via Authorization: Bearer
+
+Confirmed against real Azure: presenting `Authorization: Bearer <access_token>`
+directly to a protected route — skipping `/.auth/login/<idp>` entirely — does
+authenticate, exactly as Microsoft's own "daemon client application" docs
+describe. Client-directed sign-in (`X-ZUMO-AUTH`) isn't required — a plain
+standard OAuth 2.0 `Authorization` header works as an alternative, simpler path,
+confirmed live.
 
 ## Recording results
 

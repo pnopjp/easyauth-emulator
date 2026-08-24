@@ -1,17 +1,19 @@
 """
 Minimal backend for the App Service -> Azure Functions cross-origin demo (see
-README.md). Serves one HTML page whose JavaScript:
+README.md). Serves one HTML page whose JavaScript offers two ways to call a
+*different* Azure Functions app's protected /api/session, both starting from the
+same access_token already sitting in this App Service's own token store (read via
+same-origin /.auth/me, cookie sent automatically — the App Service session cookie
+itself never crosses origins, so it can't be used directly against Functions):
 
-  1. GETs /.auth/me on this same origin (the session cookie from this App Service's
-     own Easy Auth login is sent automatically) to read the access_token Easy Auth
-     already put in the token store.
-  2. POSTs that access_token to a *different* Azure Functions app's
-     /.auth/login/aad (client-directed sign-in) to get back that app's own
-     authenticationToken — this step is what stands in for "a JS client that
-     already has a token" per the official client-directed-flow docs.
-  3. GETs the Functions app's /api/session with X-ZUMO-AUTH: <authenticationToken>
-     instead of a cookie, since the App Service session cookie itself never crosses
-     origins.
+  - "Run (X-ZUMO-AUTH)": the client-directed sign-in flow — POST the access_token
+    to the Functions app's /.auth/login/aad to get back its own authenticationToken,
+    then call /api/session with X-ZUMO-AUTH: <authenticationToken>.
+  - "Run (Authorization: Bearer)": presents the access_token directly to
+    /api/session via a plain Authorization: Bearer header, skipping the
+    /.auth/login/aad round trip entirely — the "daemon client application"
+    (service-to-service) pattern from Microsoft's own docs, distinct from
+    client-directed sign-in.
 
 Deploy this behind the SAME App Service already used in ../azure-zumo-auth-poc
 (Easy Auth/Entra ID already configured there) — see README.md.
@@ -39,15 +41,16 @@ _HTML = """<!doctype html>
 <p>
   This page is served by an App Service protected by Easy Auth. Its JavaScript below
   reuses the access_token already sitting in <em>this</em> App Service's token store
-  (via <code>/.auth/me</code>, same-origin, cookie sent automatically) to sign in to a
-  <strong>different</strong> Azure Functions app via its client-directed sign-in flow,
-  then calls that Functions app's <code>/api/session</code> with
-  <code>X-ZUMO-AUTH</code> instead of a cookie.
+  (via <code>/.auth/me</code>, same-origin, cookie sent automatically) to call a
+  <strong>different</strong> Azure Functions app's protected <code>/api/session</code>
+  — either via the client-directed sign-in flow (<code>X-ZUMO-AUTH</code>) or by
+  presenting the access_token directly as <code>Authorization: Bearer</code>.
 </p>
 <label>Functions app base URL
   <input id="funcBase" placeholder="https://&lt;func-app&gt;.azurewebsites.net">
 </label>
-<button id="run">Run</button>
+<button id="runZumo">Run (X-ZUMO-AUTH)</button>
+<button id="runBearer">Run (Authorization: Bearer)</button>
 <pre id="out"></pre>
 <script>
 const out = document.getElementById('out');
@@ -64,27 +67,44 @@ function decodeJwtClaims(jwt) {
   }
 }
 
-document.getElementById('run').addEventListener('click', async () => {
-  out.textContent = '';
+// Shared by both buttons: read this App Service's own stored access_token via
+// same-origin /.auth/me. Returns null (after logging why) if unavailable.
+async function getAccessToken() {
+  log('1. GET /.auth/me (same-origin, cookie sent automatically)...');
+  const meResp = await fetch('/.auth/me', { credentials: 'same-origin' });
+  const me = await meResp.json();
+  if (!me.length) {
+    log('Not authenticated on this App Service. Sign in first, then reload this page.');
+    return null;
+  }
+  const accessToken = me[0].access_token;
+  log('Got access_token from the token store (length ' + accessToken.length + ').');
+  const claims = decodeJwtClaims(accessToken);
+  if (claims) {
+    log('access_token claims (subset only): ' + JSON.stringify({
+      aud: claims.aud, appid: claims.appid, azp: claims.azp, scp: claims.scp,
+      iss: claims.iss, ver: claims.ver, tid: claims.tid,
+      email: claims.email, preferred_username: claims.preferred_username, upn: claims.upn,
+      iat: claims.iat, exp: claims.exp,
+    }));
+  }
+  return accessToken;
+}
+
+function getFuncBase() {
   const funcBase = document.getElementById('funcBase').value.replace(/\\/$/, '');
-  if (!funcBase) { log('Enter the Functions app base URL first.'); return; }
+  if (!funcBase) log('Enter the Functions app base URL first.');
+  return funcBase || null;
+}
+
+document.getElementById('runZumo').addEventListener('click', async () => {
+  out.textContent = '';
+  const funcBase = getFuncBase();
+  if (!funcBase) return;
 
   try {
-    log('1. GET /.auth/me (same-origin, cookie sent automatically)...');
-    const meResp = await fetch('/.auth/me', { credentials: 'same-origin' });
-    const me = await meResp.json();
-    if (!me.length) { log('Not authenticated on this App Service. Sign in first, then reload this page.'); return; }
-    const accessToken = me[0].access_token;
-    log('Got access_token from the token store (length ' + accessToken.length + ').');
-    const claims = decodeJwtClaims(accessToken);
-    if (claims) {
-      log('access_token claims (subset only): ' + JSON.stringify({
-        aud: claims.aud, appid: claims.appid, azp: claims.azp, scp: claims.scp,
-        iss: claims.iss, ver: claims.ver, tid: claims.tid,
-        email: claims.email, preferred_username: claims.preferred_username, upn: claims.upn,
-        iat: claims.iat, exp: claims.exp,
-      }));
-    }
+    const accessToken = await getAccessToken();
+    if (!accessToken) return;
 
     log('2. POST ' + funcBase + '/.auth/login/aad (cross-origin, client-directed sign-in)...');
     const loginResp = await fetch(funcBase + '/.auth/login/aad', {
@@ -101,6 +121,30 @@ document.getElementById('run').addEventListener('click', async () => {
     log('3. GET ' + funcBase + '/api/session with X-ZUMO-AUTH...');
     const apiResp = await fetch(funcBase + '/api/session', {
       headers: { 'X-ZUMO-AUTH': zumoToken },
+    });
+    log('HTTP ' + apiResp.status);
+    const apiJson = await apiResp.json();
+    log(apiJson);
+  } catch (err) {
+    log('Error (often a CORS failure — check the browser devtools Network/Console tabs): ' + err);
+  }
+});
+
+document.getElementById('runBearer').addEventListener('click', async () => {
+  out.textContent = '';
+  const funcBase = getFuncBase();
+  if (!funcBase) return;
+
+  try {
+    const accessToken = await getAccessToken();
+    if (!accessToken) return;
+
+    // No /.auth/login/aad round trip — present the access_token straight to the
+    // protected route via the standard OAuth 2.0 Authorization header, per the
+    // "daemon client application" (service-to-service) pattern in Microsoft's docs.
+    log('2. GET ' + funcBase + '/api/session with Authorization: Bearer...');
+    const apiResp = await fetch(funcBase + '/api/session', {
+      headers: { 'Authorization': 'Bearer ' + accessToken },
     });
     log('HTTP ' + apiResp.status);
     const apiJson = await apiResp.json();

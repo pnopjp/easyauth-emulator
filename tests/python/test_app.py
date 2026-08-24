@@ -571,3 +571,46 @@ class TestCorsAllowedOrigin:
     def test_non_matching_origin_returns_none(self):
         allowed = ["https://a.example.com"]
         assert _cors_allowed_origin("https://evil.example.com", allowed) is None
+
+
+# ---------------------------------------------------------------------------
+# _RoutingMixin._bearer_token_from_request — X-ZUMO-AUTH vs. Authorization: Bearer
+# ---------------------------------------------------------------------------
+
+class _StubRequest(app_module._RoutingMixin):
+    """Minimal _RoutingMixin host for testing _bearer_token_from_request in
+    isolation — only _header is needed for that method."""
+
+    def __init__(self, headers: dict):
+        self._test_headers = {k.lower(): v for k, v in headers.items()}
+
+    def _header(self, name: str) -> str:
+        return self._test_headers.get(name.lower(), "")
+
+
+class TestBearerTokenFromRequest:
+    def test_neither_header_returns_empty(self):
+        assert _StubRequest({})._bearer_token_from_request() == ""
+
+    def test_zumo_auth_header_is_used(self):
+        req = _StubRequest({"X-ZUMO-AUTH": "the-zumo-token"})
+        assert req._bearer_token_from_request() == "the-zumo-token"
+
+    def test_authorization_bearer_header_is_used(self):
+        req = _StubRequest({"Authorization": "Bearer the-bearer-token"})
+        assert req._bearer_token_from_request() == "the-bearer-token"
+
+    def test_authorization_scheme_is_case_insensitive(self):
+        req = _StubRequest({"Authorization": "bearer the-bearer-token"})
+        assert req._bearer_token_from_request() == "the-bearer-token"
+
+    def test_non_bearer_authorization_scheme_is_ignored(self):
+        req = _StubRequest({"Authorization": "Basic dXNlcjpwYXNz"})
+        assert req._bearer_token_from_request() == ""
+
+    def test_zumo_auth_takes_precedence_over_authorization(self):
+        req = _StubRequest({
+            "X-ZUMO-AUTH": "the-zumo-token",
+            "Authorization": "Bearer the-bearer-token",
+        })
+        assert req._bearer_token_from_request() == "the-zumo-token"
