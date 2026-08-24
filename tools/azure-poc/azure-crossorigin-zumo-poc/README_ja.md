@@ -14,7 +14,7 @@ Functions APIを呼ぶ」という実際のアーキテクチャパターンを�
 3. Functions Appの`GET /api/session`を`X-ZUMO-AUTH: <authenticationToken>`付きで
    呼ぶ(Cookieはオリジンをまたがないため使えない)
 
-## 状態: 検証完了(C1〜C6確定。C4は新規発見、C5でその回避策と本人一致を確認、C6でローカルEmulatorをFunctions役にしても同じ流れが成功することを確認)
+## 状態: 検証完了(C1〜C7確定。C4は新規発見、C5でその回避策と本人一致を確認、C6・C7でローカルEmulatorをFunctions役・App Service役それぞれにしても同じ流れが成功することを確認)
 
 - **C1・C2(確定、2026-08-24)**: `az functionapp cors add`でApp Serviceのオリジンを
   許可するだけで、`/.auth/login/aad`(POST)・`/api/session`(GET)ともにクロスオリジン
@@ -52,6 +52,17 @@ Functions APIを呼ぶ」という実際のアーキテクチャパターンを�
   preflight応答で二重送信されてしまう不具合)を発見・修正した(`src/app.py`の
   `_dispatch()`のpreflight応答から、`end_headers()`側で既に付与される
   `_cors_response_headers()`の重複呼び出しを削除)
+- **C7(確定、2026-08-26)**: C6の逆方向、**App Service役をローカルのeasyauth-emulator
+  (https、`site.localhost`)にして、実機のFunctions App(既存のものをそのまま利用)へ
+  クロスオリジンでアクセスする構成**も試し、成功した(全ステップ`200`)。この際、
+  ローカルEmulator側の`IDP_ENTRA_SCOPES`が既定値(`openid profile email`のみ)だと
+  Microsoft Graph向けのトークン(`aud`がGraphの固定ID)になってしまい`401`になった。
+  さらに、`IDP_ENTRA_SCOPES`に別の検証(Storage連携機能)で使っていたStorage向け
+  スコープ(`aud`が`https://storage.azure.com`になった)が残っていたケースも遭遇した。
+  App Service側で`loginParameters`にscopeを追加したのと同じ理由で、ローカル側も
+  `IDP_ENTRA_SCOPES = "openid profile email api://<client-id>/user_impersonation"`
+  と、このアプリ自身向けのスコープを明示的に設定する必要がある(既定値へのコメント
+  アウトでは戻ってしまうので不可)
 
 ## 前提条件
 

@@ -17,7 +17,7 @@ Functions API.
    `X-ZUMO-AUTH: <authenticationToken>` — a cookie can't cross origins, so this is
    the only option.
 
-## Status: verification complete (C1-C6 confirmed — C4 is a new finding, C5 confirms the workaround and identity match, C6 confirms the same round trip against a local Emulator instance in the Functions role)
+## Status: verification complete (C1-C7 confirmed — C4 is a new finding, C5 confirms the workaround and identity match, C6/C7 confirm the same round trip with a local Emulator instance in either the Functions or App Service role)
 
 - **C1/C2 (confirmed, 2026-08-24)**: `az functionapp cors add` for the App Service's
   origin was enough — both `POST /.auth/login/aad` and `GET /api/session` succeeded
@@ -59,6 +59,17 @@ Functions API.
   (`end_headers()` already adds it via `_cors_response_headers()`; the preflight
   handler in `_dispatch()` was redundantly adding it again) — browsers reject a
   duplicated `Access-Control-Allow-Origin` outright.
+- **C7 (confirmed, 2026-08-26)**: The reverse of C6 — playing the **App Service role
+  with a local easyauth-emulator instance** (HTTPS, `site.localhost`) instead, calling
+  cross-origin into the existing real Functions app — also succeeded end to end
+  (every step `200`). Along the way, the local emulator's `IDP_ENTRA_SCOPES` left at
+  its default (`openid profile email` only) produced a Microsoft-Graph-audienced
+  token (same `401` failure mode as before), and a leftover Storage-testing scope
+  from unrelated prior work produced an `aud` of `https://storage.azure.com` at one
+  point too. As on the App Service side (`loginParameters`), the local side also
+  needs `IDP_ENTRA_SCOPES` explicitly set to
+  `"openid profile email api://<client-id>/user_impersonation"` — commenting it out
+  reverts to the Graph-audienced default rather than fixing anything.
 
 ## Open questions
 
