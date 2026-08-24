@@ -244,6 +244,7 @@ http://localhost:8080/oauth2/callback
 | `easyauth.skipAuthRoutes` | `""` | 認証をバイパスするルート — カンマ区切りの `[METHOD=]REGEX` パターン |
 | `easyauth.debugHeadersEndpointEnabled` | `false` | `GET /.debug/headers` エンドポイントを有効化（注入されたヘッダーを確認可能） |
 | `easyauth.idpSelectIcons` | `simple` | IdP 選択画面のアイコンスタイル: `simple`、`generic`、`text` |
+| `easyauth.corsAllowedOrigins` | `""` | 許可するCORSオリジン(カンマ区切り、または任意のオリジンを許可する`*`) |
 
 ### oauth2-proxy
 

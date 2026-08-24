@@ -42,11 +42,19 @@ graph LR
 - `GET /.auth/login`
 - `GET /.auth/login/<idp>`
   - 例\) `GET /.auth/login/aad`
+- `POST /.auth/login/<idp>` _（クライアント主導ログイン）_
 - `GET /.auth/logout`
 - `GET /.auth/refresh` _（互換性のためのダミー実装 — 認証済みは 200 OK、未認証は 401 を返す。トークン更新は行わない）_
 - `GET /.auth/login/select` _（エミュレーター独自実装 — Azure Easy Auth には存在しない）_
 
 上記以外の `/.auth/*` エンドポイントは 404 を返します。
+
+## 認証ヘッダー
+
+`Cookie` に加えて、次のヘッダーでも認証できます:
+
+- `Authorization: Bearer <token>`
+- `X-ZUMO-AUTH`
 
 ## 注入されるヘッダー
 

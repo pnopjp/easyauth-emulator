@@ -454,6 +454,8 @@ export class EmulatorManager implements vscode.Disposable {
         }
         const idpSelectIcons = config.get<string>('idpSelectIcons', '').trim();
         if (idpSelectIcons) extra['IDP_SELECT_ICONS'] = idpSelectIcons;
+        const corsAllowedOrigins = config.get<string>('corsAllowedOrigins', '').trim();
+        if (corsAllowedOrigins) extra['CORS_ALLOWED_ORIGINS'] = corsAllowedOrigins;
 
         // Built-in IDPs
         const BUILTIN_IDPS: Array<[string, string]> = [

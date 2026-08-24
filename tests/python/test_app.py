@@ -11,17 +11,22 @@ from pathlib import Path
 
 import pytest
 
+import src.app as app_module
 from src.app import (
     _build_provider_logout_url,
+    _check_auth,
     _compute_client_principal,
+    _cors_allowed_origin,
     _decode_jwt_claims,
     _decode_principal,
+    _extract_access_token,
     _idp_auth_provider,
     _idp_cfg_prefix,
     _idp_logout_endpoint,
     _idp_user_id_claim,
     _load_config,
     _parse_bool_cfg,
+    _parse_cors_origins,
     _parse_skip_routes,
     _provider_logout_bridge_url,
     _safe_redirect,
@@ -445,3 +450,167 @@ class TestBuildProviderLogoutUrl:
         decoded = unquote(result)
         assert "https://xxx-8080.usw2.devtunnels.ms/bye" in decoded
         assert "devtunnels.ms:8080" not in decoded
+
+
+# ---------------------------------------------------------------------------
+# _extract_access_token (client-directed sign-in / X-ZUMO-AUTH support)
+# ---------------------------------------------------------------------------
+
+class TestExtractAccessToken:
+    def test_valid_body_returns_token(self):
+        assert _extract_access_token(b'{"access_token": "abc123"}') == "abc123"
+
+    def test_missing_field_returns_empty(self):
+        assert _extract_access_token(b'{}') == ""
+
+    def test_none_body_returns_empty(self):
+        assert _extract_access_token(None) == ""
+
+    def test_empty_bytes_returns_empty(self):
+        assert _extract_access_token(b'') == ""
+
+    def test_malformed_json_returns_empty(self):
+        assert _extract_access_token(b'not json') == ""
+
+    def test_non_object_json_returns_empty(self):
+        assert _extract_access_token(b'[1, 2, 3]') == ""
+
+    def test_whitespace_only_token_returns_empty(self):
+        assert _extract_access_token(b'{"access_token": "   "}') == ""
+
+    def test_surrounding_whitespace_is_stripped(self):
+        assert _extract_access_token(b'{"access_token": "  abc123  "}') == "abc123"
+
+
+# ---------------------------------------------------------------------------
+# _check_auth — X-ZUMO-AUTH bearer_token takes precedence over Cookie
+# ---------------------------------------------------------------------------
+
+class _FakeAuthResponse:
+    """Stands in for oauth2-proxy's /oauth2/auth response — every header
+    lookup returns the caller-supplied default, mirroring an authenticated
+    request with no extra claims (enough to exercise which request headers
+    _check_auth actually sent, not what it does with the response)."""
+
+    def getheader(self, name, default=""):
+        return default
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+class TestCheckAuthBearerTokenPrecedence:
+    def _capture_request_headers(self, monkeypatch):
+        monkeypatch.setitem(app_module._IDP_PORT_MAP, "entra", 4180)
+        captured: dict = {}
+
+        def fake_urlopen(req, timeout=10):
+            captured["headers"] = dict(req.header_items())
+            return _FakeAuthResponse()
+
+        monkeypatch.setattr(app_module, "urlopen", fake_urlopen)
+        return captured
+
+    def test_bearer_token_sent_as_authorization_not_cookie(self, monkeypatch):
+        captured = self._capture_request_headers(monkeypatch)
+        _check_auth(
+            "entra", cookie="_oauth2_proxy_entra=stale-session",
+            real_ip="", proto="", host="", uri="/",
+            bearer_token="the-access-token",
+        )
+        assert captured["headers"].get("Authorization") == "Bearer the-access-token"
+        assert "Cookie" not in captured["headers"]
+
+    def test_falls_back_to_cookie_when_no_bearer_token(self, monkeypatch):
+        captured = self._capture_request_headers(monkeypatch)
+        _check_auth("entra", cookie="session=abc", real_ip="", proto="", host="", uri="/")
+        assert captured["headers"].get("Cookie") == "session=abc"
+        assert "Authorization" not in captured["headers"]
+
+
+# ---------------------------------------------------------------------------
+# _parse_cors_origins / _cors_allowed_origin
+# ---------------------------------------------------------------------------
+
+class TestParseCorsOrigins:
+    def test_empty_string_means_off(self):
+        assert _parse_cors_origins("") is None
+
+    def test_whitespace_only_means_off(self):
+        assert _parse_cors_origins("   ") is None
+
+    def test_wildcard(self):
+        assert _parse_cors_origins("*") == ["*"]
+
+    def test_single_origin(self):
+        assert _parse_cors_origins("https://example.com") == ["https://example.com"]
+
+    def test_comma_separated_list_is_stripped(self):
+        assert _parse_cors_origins(" https://a.example.com , https://b.example.com ") == [
+            "https://a.example.com", "https://b.example.com",
+        ]
+
+
+class TestCorsAllowedOrigin:
+    def test_feature_off_returns_none(self):
+        assert _cors_allowed_origin("https://example.com", None) is None
+
+    def test_no_origin_header_returns_none(self):
+        assert _cors_allowed_origin("", ["https://example.com"]) is None
+
+    def test_wildcard_allows_any_origin(self):
+        assert _cors_allowed_origin("https://anything.example.com", ["*"]) == "*"
+
+    def test_matching_origin_is_echoed(self):
+        allowed = ["https://a.example.com", "https://b.example.com"]
+        assert _cors_allowed_origin("https://b.example.com", allowed) == "https://b.example.com"
+
+    def test_non_matching_origin_returns_none(self):
+        allowed = ["https://a.example.com"]
+        assert _cors_allowed_origin("https://evil.example.com", allowed) is None
+
+
+# ---------------------------------------------------------------------------
+# _RoutingMixin._bearer_token_from_request — X-ZUMO-AUTH vs. Authorization: Bearer
+# ---------------------------------------------------------------------------
+
+class _StubRequest(app_module._RoutingMixin):
+    """Minimal _RoutingMixin host for testing _bearer_token_from_request in
+    isolation — only _header is needed for that method."""
+
+    def __init__(self, headers: dict):
+        self._test_headers = {k.lower(): v for k, v in headers.items()}
+
+    def _header(self, name: str) -> str:
+        return self._test_headers.get(name.lower(), "")
+
+
+class TestBearerTokenFromRequest:
+    def test_neither_header_returns_empty(self):
+        assert _StubRequest({})._bearer_token_from_request() == ""
+
+    def test_zumo_auth_header_is_used(self):
+        req = _StubRequest({"X-ZUMO-AUTH": "the-zumo-token"})
+        assert req._bearer_token_from_request() == "the-zumo-token"
+
+    def test_authorization_bearer_header_is_used(self):
+        req = _StubRequest({"Authorization": "Bearer the-bearer-token"})
+        assert req._bearer_token_from_request() == "the-bearer-token"
+
+    def test_authorization_scheme_is_case_insensitive(self):
+        req = _StubRequest({"Authorization": "bearer the-bearer-token"})
+        assert req._bearer_token_from_request() == "the-bearer-token"
+
+    def test_non_bearer_authorization_scheme_is_ignored(self):
+        req = _StubRequest({"Authorization": "Basic dXNlcjpwYXNz"})
+        assert req._bearer_token_from_request() == ""
+
+    def test_zumo_auth_takes_precedence_over_authorization(self):
+        req = _StubRequest({
+            "X-ZUMO-AUTH": "the-zumo-token",
+            "Authorization": "Bearer the-bearer-token",
+        })
+        assert req._bearer_token_from_request() == "the-zumo-token"

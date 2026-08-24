@@ -42,11 +42,19 @@ Develop locally with an authentication model compatible with production Azure Ap
 - `GET /.auth/login`
 - `GET /.auth/login/<idp>`
   - e.g. `GET /.auth/login/aad`
+- `POST /.auth/login/<idp>` _(client-directed sign-in)_
 - `GET /.auth/logout`
 - `GET /.auth/refresh` _(stub implementation — returns 200 if authenticated, 401 if not; no token refresh is performed)_
 - `GET /.auth/login/select` _(emulator only — not part of Azure Easy Auth)_
 
 Any `/.auth/*` endpoint not listed above returns 404.
+
+## Authentication headers
+
+In addition to `Cookie`, these headers are also accepted for authentication:
+
+- `Authorization: Bearer <token>`
+- `X-ZUMO-AUTH`
 
 ## Injected Headers
 

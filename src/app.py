@@ -321,6 +321,32 @@ def _parse_skip_routes(raw: str) -> "list[tuple[str, re.Pattern]]":
 SKIP_AUTH_ROUTES = _parse_skip_routes(_cfg("SKIP_AUTH_ROUTES") or "")
 
 
+def _parse_cors_origins(raw: str) -> "list[str] | None":
+    """None = feature off (default). ["*"] = allow any origin. Otherwise an
+    explicit comma-separated origin allow-list — mirrors real Azure App
+    Service/Functions' own "CORS" platform setting (confirmed against real
+    Azure to apply to every route including /.auth/*, independent of Easy Auth
+    itself — see tools/azure-poc/azure-crossorigin-zumo-poc)."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    if raw == "*":
+        return ["*"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def _cors_allowed_origin(origin: str, allowed: "list[str] | None") -> "str | None":
+    """The exact Access-Control-Allow-Origin value to send, or None to omit it."""
+    if not origin or not allowed:
+        return None
+    if allowed == ["*"]:
+        return "*"
+    return origin if origin in allowed else None
+
+
+CORS_ALLOWED_ORIGINS = _parse_cors_origins(_cfg("CORS_ALLOWED_ORIGINS", ""))
+
+
 def _idp_cfg_prefix(idp: str) -> str:
     return f"IDP_{idp.upper().replace('-', '_')}"
 
@@ -468,10 +494,31 @@ def _compute_client_principal(user: str, email: str, auth_provider: str, user_id
     ).decode("ascii")
 
 
-def _check_auth(idp: str, cookie: str, real_ip: str, proto: str, host: str, uri: str) -> "dict[str, str] | None":
+def _extract_access_token(body: "bytes | None") -> str:
+    """Parse a client-directed sign-in POST body ({"access_token": "..."}) —
+    returns "" if the body is missing, malformed, or has no access_token,
+    which callers treat as a 400 (real Azure: 'access_token' field is
+    required.)."""
+    try:
+        payload = json.loads(body) if body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("access_token") or "").strip()
+
+
+def _check_auth(idp: str, cookie: str, real_ip: str, proto: str, host: str, uri: str,
+                 bearer_token: str = "") -> "dict[str, str] | None":
     """
     Call the IDP's oauth2-proxy /oauth2/auth endpoint.
     Returns enriched auth headers on success (2xx), None on 401/403/error.
+
+    bearer_token (the client-directed sign-in / X-ZUMO-AUTH access_token)
+    takes precedence over cookie when both are given — sent as
+    Authorization: Bearer, validated by oauth2-proxy's own
+    --skip-jwt-bearer-tokens/--extra-jwt-issuers support (see start.py)
+    instead of a session cookie lookup.
     """
     port = _IDP_PORT_MAP.get(idp)
     if port is None:
@@ -481,7 +528,9 @@ def _check_auth(idp: str, cookie: str, real_ip: str, proto: str, host: str, uri:
     user_id_claim = _idp_user_id_claim(idp)
 
     req = UrlRequest(auth_url)
-    if cookie:
+    if bearer_token:
+        req.add_header("Authorization", f"Bearer {bearer_token}")
+    elif cookie:
         req.add_header("Cookie", cookie)
     if real_ip:
         req.add_header("X-Real-IP", real_ip)
@@ -650,7 +699,39 @@ class _RoutingMixin:
 
     # --- Routing ---
 
+    def _cors_response_headers(self) -> "list[tuple[str, str]]":
+        """Access-Control-Allow-Origin (+ Vary) to add to a response, or []
+        if CORS is off or this request's Origin isn't allowed. Recomputed
+        fresh on every call rather than cached on self — an HTTP/1.1 _Handler
+        instance persists across a keep-alive connection's multiple requests,
+        so a cached value could leak into a later request with a different
+        (or no) Origin."""
+        allowed = _cors_allowed_origin(self._header("Origin"), CORS_ALLOWED_ORIGINS)
+        if not allowed:
+            return []
+        return [("Access-Control-Allow-Origin", allowed), ("Vary", "Origin")]
+
     def _dispatch(self) -> None:
+        if self.command == "OPTIONS":
+            origin = self._header("Origin")
+            request_method = self._header("Access-Control-Request-Method")
+            if origin and request_method and _cors_allowed_origin(origin, CORS_ALLOWED_ORIGINS):
+                # A real CORS preflight — answered directly, the same way real
+                # Azure's own CORS platform feature intercepts it before Easy
+                # Auth or app routing ever see it (confirmed against real
+                # Azure — see tools/azure-poc/azure-crossorigin-zumo-poc).
+                # Access-Control-Allow-Origin/Vary aren't set here — every
+                # _send_*/_stream_* implementation already adds them via
+                # _cors_response_headers() (end_headers() override for
+                # _Handler, inline injection for _Http2StreamHandler); adding
+                # them here too would duplicate the header (invalid, browsers
+                # reject "Access-Control-Allow-Origin: *, *").
+                self._send_empty(200, {
+                    "Access-Control-Allow-Methods": request_method,
+                    "Access-Control-Allow-Headers": self._header("Access-Control-Request-Headers") or "*",
+                })
+                return
+
         path = urlsplit(self.path).path
 
         if path == "/healthz":
@@ -662,9 +743,17 @@ class _RoutingMixin:
         elif path == "/.auth/login/select":
             self._handle_auth_login_select()
         elif path == "/.auth/login/aad":
-            self._handle_auth_login_aad()
+            if self.command == "POST":
+                target = "entra" if "entra" in IDP_LIST else self._current_idp()
+                self._handle_client_directed_login(target)
+            else:
+                self._handle_auth_login_aad()
         elif path.startswith("/.auth/login/"):
-            self._handle_auth_login_idp(path[len("/.auth/login/"):])
+            idp = path[len("/.auth/login/"):]
+            if self.command == "POST":
+                self._handle_client_directed_login(idp)
+            else:
+                self._handle_auth_login_idp(idp)
         elif path == "/.auth/logout":
             self._handle_auth_logout()
         elif path.startswith("/.auth/provider_logout/"):
@@ -715,6 +804,49 @@ class _RoutingMixin:
         if len(IDP_LIST) == 1:
             return IDP_LIST[0]
         return ""
+
+    def _bearer_token_from_request(self) -> str:
+        """X-ZUMO-AUTH (Easy Auth's own client-directed-flow header) takes
+        precedence when present; otherwise a plain standard
+        Authorization: Bearer header is honored too — confirmed against real
+        Azure as a separate, simpler path that skips /.auth/login/<idp>
+        entirely (the "daemon client application" / service-to-service
+        pattern from Microsoft's own docs; see
+        tools/azure-poc/azure-crossorigin-zumo-poc's C8). Returns "" if
+        neither is present."""
+        zumo = self._header("X-ZUMO-AUTH")
+        if zumo:
+            return zumo
+        auth_header = self._header("Authorization")
+        if auth_header.lower().startswith("bearer "):
+            return auth_header[7:].strip()
+        return ""
+
+    def _check_auth_via_bearer_token(self, bearer_token: str) -> "tuple[str, dict[str, str]] | None":
+        """Neither X-ZUMO-AUTH nor Authorization: Bearer carries an idp hint
+        (unlike /.auth/login/<idp>'s path), so try the idp the request
+        otherwise looks like it belongs to first (cheap, the common case),
+        then fall back to every configured idp in order (IDP_LIST is already
+        deterministic) until one's oauth2-proxy validates the token. Returns
+        (idp, auth_result) on success."""
+        candidates = [i for i in (self._current_idp(),) if i] + [i for i in IDP_LIST]
+        tried: set[str] = set()
+        for idp in candidates:
+            if idp in tried:
+                continue
+            tried.add(idp)
+            auth_result = _check_auth(
+                idp,
+                cookie="",
+                bearer_token=bearer_token,
+                real_ip=self._client_ip(),
+                proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
+                host=self._header("Host"),
+                uri=self.path,
+            )
+            if auth_result is not None:
+                return (idp, auth_result)
+        return None
 
     # --- Proxy helper ---
 
@@ -891,18 +1023,26 @@ class _RoutingMixin:
     # --- Route handlers ---
 
     def _handle_auth_me(self) -> None:
-        idp = self._current_idp()
-        if not idp:
-            self._send_json([])
-            return
-        auth_result = _check_auth(
-            idp,
-            cookie=self._header("Cookie"),
-            real_ip=self._client_ip(),
-            proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
-            host=self._header("Host"),
-            uri=self.path,
-        )
+        bearer = self._bearer_token_from_request()
+        if bearer:
+            matched = self._check_auth_via_bearer_token(bearer)
+            if not matched:
+                self._send_json([])
+                return
+            idp, auth_result = matched
+        else:
+            idp = self._current_idp()
+            if not idp:
+                self._send_json([])
+                return
+            auth_result = _check_auth(
+                idp,
+                cookie=self._header("Cookie"),
+                real_ip=self._client_ip(),
+                proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
+                host=self._header("Host"),
+                uri=self.path,
+            )
         if not auth_result:
             self._send_json([])
             return
@@ -999,6 +1139,47 @@ class _RoutingMixin:
     </div>
   </body>
 </html>""")
+
+    def _handle_client_directed_login(self, idp: str) -> None:
+        """POST /.auth/login/<idp> — Easy Auth's client-directed sign-in flow
+        for non-browser clients: the caller posts a provider access_token
+        (already obtained via the provider's own SDK) instead of going
+        through the browser redirect dance. On success, the returned
+        authenticationToken is presented on later requests via the
+        X-ZUMO-AUTH header (see _handle_protected/_handle_auth_me) in place
+        of the session cookie."""
+        normalized = idp.strip().lower()
+        if normalized not in IDP_LIST:
+            self._send_json({"error": "unknown idp", "idp": normalized}, status=404)
+            return
+        access_token = _extract_access_token(self._read_request_body())
+        if not access_token:
+            self._send_empty(400)
+            return
+        auth_result = _check_auth(
+            normalized,
+            cookie="",
+            bearer_token=access_token,
+            real_ip=self._client_ip(),
+            proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
+            host=self._header("Host"),
+            uri=self.path,
+        )
+        if auth_result is None:
+            self._send_empty(401)
+            return
+        # Reusing the input access_token as the authenticationToken is a
+        # deliberate emulator-only shortcut: real Azure mints a distinct,
+        # separately-formatted opaque token here (confirmed via
+        # tools/azure-poc/azure-zumo-auth-poc — a real AppServiceAuthSession
+        # cookie value is NOT interchangeable with it either). This shortcut
+        # works because the same value is what _check_auth's bearer_token
+        # path re-validates on every later request — it's not meant to be a
+        # format guarantee, so don't try to decode it as a session token.
+        self._send_json({
+            "authenticationToken": access_token,
+            "user": {"userId": auth_result.get("X-MS-CLIENT-PRINCIPAL-ID", "")},
+        })
 
     def _handle_auth_login_idp(self, idp: str) -> None:
         normalized = idp.strip().lower()
@@ -1173,21 +1354,36 @@ class _RoutingMixin:
                     self._proxy_to(APP_UPSTREAM, strip_headers=_AUTH_HEADERS_TO_STRIP)
                 return
 
-        idp = self._current_idp()
-        if not idp:
-            self._deny_unauthenticated()
-            return
-        auth_result = _check_auth(
-            idp,
-            cookie=self._header("Cookie"),
-            real_ip=self._client_ip(),
-            proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
-            host=self._header("Host"),
-            uri=self.path,
-        )
-        if auth_result is None:
-            self._deny_unauthenticated()
-            return
+        bearer = self._bearer_token_from_request()
+        if bearer:
+            # X-ZUMO-AUTH / Authorization: Bearer take precedence over Cookie
+            # when both are present, and an invalid one always gets a bare
+            # 401 — never the redirect-to-login behavior
+            # _deny_unauthenticated() gives an invalid/missing Cookie
+            # (confirmed against real Azure, see
+            # tools/azure-poc/azure-zumo-auth-poc and
+            # tools/azure-poc/azure-crossorigin-zumo-poc's C8).
+            matched = self._check_auth_via_bearer_token(bearer)
+            if not matched:
+                self._send_empty(401)
+                return
+            idp, auth_result = matched
+        else:
+            idp = self._current_idp()
+            if not idp:
+                self._deny_unauthenticated()
+                return
+            auth_result = _check_auth(
+                idp,
+                cookie=self._header("Cookie"),
+                real_ip=self._client_ip(),
+                proto=self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
+                host=self._header("Host"),
+                uri=self.path,
+            )
+            if auth_result is None:
+                self._deny_unauthenticated()
+                return
         extra: dict[str, str] = {
             "X-Real-IP":               self._client_ip(),
             "X-Forwarded-Proto":       self._header("X-Forwarded-Proto") or _DEFAULT_PROTO,
@@ -1219,6 +1415,16 @@ class _Handler(BaseHTTPRequestHandler, _RoutingMixin):
 
     def log_message(self, *_) -> None:
         return
+
+    def end_headers(self) -> None:
+        # Single choke point for every HTTP/1.1 response (ordinary responses,
+        # proxied protected routes, SSE all go through BaseHTTPRequestHandler's
+        # send_header/end_headers) — except _proxy_websocket's handshake, which
+        # writes raw bytes straight to self.wfile and never calls this; that's
+        # fine, WebSocket doesn't use fetch-CORS semantics anyway.
+        for name, value in self._cors_response_headers():
+            self.send_header(name, value)
+        super().end_headers()
 
     def do_GET(self)     -> None: self._dispatch()
     def do_POST(self)    -> None: self._dispatch()
@@ -1563,15 +1769,18 @@ class _Http2StreamHandler(_RoutingMixin):
 
     def _send_response_with_trailers(self, status: int, headers: "list[tuple[str, str]]",
                                        body: bytes, trailers: "list[tuple[str, str]]") -> None:
+        headers = list(headers) + self._cors_response_headers()
         self._conn.send_stream_response(self._stream_id, status, headers, body, trailers=trailers or None)
 
     def _send_response(self, status: int, headers: "list[tuple[str, str]]", body: bytes) -> None:
+        headers = list(headers) + self._cors_response_headers()
         self._conn.send_stream_response(self._stream_id, status, headers, body)
 
     def _stream_response(self, status: int, headers: "list[tuple[str, str]]", chunks) -> None:
         # HTTP/2 frames data incrementally natively (no Content-Length or
         # chunked-encoding trick needed) — just send each chunk as its own
         # DATA frame and end the stream once the upstream response does.
+        headers = list(headers) + self._cors_response_headers()
         self._conn.send_stream_headers(self._stream_id, status, headers)
         try:
             for chunk in chunks:
@@ -1584,6 +1793,7 @@ class _Http2StreamHandler(_RoutingMixin):
 
     def _stream_response_with_trailers(self, status: int, headers: "list[tuple[str, str]]",
                                         chunks, get_trailers) -> None:
+        headers = list(headers) + self._cors_response_headers()
         self._conn.send_stream_headers(self._stream_id, status, headers)
         try:
             for chunk in chunks:
