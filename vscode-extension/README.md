@@ -208,6 +208,9 @@ The extension always passes `--config .vscode/easyauth.toml` to the emulator on 
 | `easyauth.autoStart` | `true` | Start emulator when a debug session begins |
 | `easyauth.autoStop` | `true` | Stop emulator when the debug session ends |
 | `easyauth.upstreamPort` | `null` | Fix the upstream port; `null` = auto-detect |
+| `easyauth.launchJsonPortKey` | `""` | Custom key name to find the port in `launch.json` (checked as an `env` entry, then a top-level config field, then an `args` flag), checked before all other auto-detection. If set and not found, auto-detection stops instead of falling back |
+| `easyauth.stdoutPortPattern` | `""` | Custom regex (one capture group) to match the port in debug output, checked before all other auto-detection. If set and it never matches, auto-detection stops instead of falling back. Example: `App listening at https?://[^:]+:(\d+)` (escape `\` as `\\` if editing settings.json directly) |
+| `easyauth.stdoutPatternTimeoutMs` | `3000` | Milliseconds to wait for a port number in debug output (applies to both the built-in framework patterns and `stdoutPortPattern`) |
 | `easyauth.portScanMax` | `5` | Ports to scan during auto-detection |
 | `easyauth.portScanBase` | `null` | Base port for scanning; `null` = use first hint found |
 | `easyauth.verbose` | `false` | Log all resolved configuration values on startup |
@@ -311,6 +314,26 @@ The extension could not determine which port your app listens on. Set `easyauth.
 
 ```json
 { "easyauth.upstreamPort": 5000 }
+```
+
+If the port varies between runs but always appears under a specific `launch.json` key (`env`, a top-level field, or an `args` flag) or a specific line in your app's startup output, use `easyauth.launchJsonPortKey` or `easyauth.stdoutPortPattern` instead — see the status bar entry `EasyAuth: port unknown` if the custom pattern you configured stops matching.
+
+For example, if your app's startup output includes this line:
+
+```text
+App listening at http://127.0.0.1:54321
+```
+
+Use a regex with exactly one capture group around the port number. If you're typing it into the Settings UI text box, enter it as-is:
+
+```text
+App listening at https?://[^:]+:(\d+)
+```
+
+If you're editing settings.json directly, escape `\` as `\\` since it's a JSON string:
+
+```json
+{ "easyauth.stdoutPortPattern": "App listening at https?://[^:]+:(\\d+)" }
 ```
 
 ### 502 error while debugging

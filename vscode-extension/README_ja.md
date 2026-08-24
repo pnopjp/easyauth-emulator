@@ -220,6 +220,9 @@ http://localhost:8080/oauth2/callback
 | `easyauth.autoStart` | `true` | デバッグセッション開始時にエミュレーターを自動起動 |
 | `easyauth.autoStop` | `true` | デバッグセッション終了時にエミュレーターを自動停止 |
 | `easyauth.upstreamPort` | `null` | アプリのポートを固定指定。`null` で自動検出 |
+| `easyauth.launchJsonPortKey` | `""` | ポート取得のため`launch.json`から探すキー名（`env`→構成直下フィールド→`args`フラグの順に判定、他の自動検出より先に評価）。指定して見つからない場合は自動検出を打ち切る |
+| `easyauth.stdoutPortPattern` | `""` | デバッグ出力からポートを抽出するカスタム正規表現（キャプチャグループ1つ、他の自動検出より先に評価）。指定して一致しない場合は自動検出を打ち切る。例: `App listening at https?://[^:]+:(\d+)`(settings.jsonに直接書く場合は`\`を`\\`に) |
+| `easyauth.stdoutPatternTimeoutMs` | `3000` | デバッグ出力からポート番号を待つ時間（ミリ秒。標準パターン・`stdoutPortPattern`共通） |
 | `easyauth.portScanMax` | `5` | 自動検出時にスキャンする連続ポート数 |
 | `easyauth.portScanBase` | `null` | スキャン開始ポート。`null` で検出されたヒントを使用 |
 | `easyauth.verbose` | `false` | 起動時に解決された設定値をすべてログ出力（シークレットはマスク） |
@@ -324,6 +327,26 @@ Microsoft Entra ID の Client ID とクライアントシークレットは設�
 
 ```json
 { "easyauth.upstreamPort": 5000 }
+```
+
+実行のたびにポートが変わるが、`launch.json` の特定のキー（`env`・構成直下フィールド・`args`フラグのいずれか）や起動ログの特定の行には必ず現れる場合は、代わりに `easyauth.launchJsonPortKey` や `easyauth.stdoutPortPattern` を使ってください。指定したパターンが一致しなくなった場合はステータスバーに `EasyAuth: port unknown` と表示されます。
+
+例えば起動ログに次の行が出るアプリなら:
+
+```text
+App listening at http://127.0.0.1:54321
+```
+
+キャプチャグループでポート番号を1つだけ囲む正規表現を指定します。Settings UIのテキストボックスに直接入力する場合はそのまま:
+
+```text
+App listening at https?://[^:]+:(\d+)
+```
+
+settings.jsonを直接編集する場合はJSON文字列として`\`を`\\`にエスケープします:
+
+```json
+{ "easyauth.stdoutPortPattern": "App listening at https?://[^:]+:(\\d+)" }
 ```
 
 ### デバッグ中にアクセスすると 502 エラーになる

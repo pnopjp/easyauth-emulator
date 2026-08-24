@@ -104,6 +104,7 @@ VS Code UI (display only)  ←─→   VS Code Extension Host
 | `unconfigured` | Not configured | No IDP `clientId` set in VS Code settings |
 | `missing_secret` | Secret not stored | `clientId` is set but no client secret is stored in SecretStorage |
 | `missing_entra_issuer` | Entra Issuer URL missing | Entra `clientId` and secret are set but `oidcIssuerUrl` is empty (Entra only) |
+| `custom_detection_failed` | Custom detection failed | `easyauth.launchJsonPortKey` / `easyauth.stdoutPortPattern` is set but neither matched (see §6) |
 | `starting` | Starting up | Immediately after launching `easyauth-emulator` |
 | `running` | Running normally | `All processes started` detected in stdout |
 | `error` | Abnormal exit | Process exited with non-zero code, or startup timed out |
@@ -193,18 +194,32 @@ Re-detection is prompted only when port detection fails and reaches the user con
 
 When multiple match, the `type` field in `launch.json` is used to disambiguate.
 
-### Steps 1–6: Port Acquisition Priority
+### Steps 1–7: Port Acquisition Priority
 
 The following sources are tried in order; the first successful result is used.
 
 | Priority | Source | Details |
 | --- | --- | --- |
 | 1 | Extension setting (manual) | `easyauth.upstreamPort` (null = auto) |
-| 2 | `launch.json` | `env.PORT` / `env.ASPNETCORE_URLS` / `env.ASPNETCORE_HTTP_PORTS` / `applicationUrl` |
-| 3 | Framework-specific config files | See table below |
-| 4 | stdout parsing | Parse debug output events using framework-specific patterns (see table below) |
-| 5 | Port scan | Fallback when all above fail |
-| 6 | User confirmation UI | When scan is ambiguous, or scan base is unknown |
+| 2 | User-specified detection | `easyauth.launchJsonPortKey` / `easyauth.stdoutPortPattern` (see below) |
+| 3 | `launch.json` (built-in keys) | `env.PORT` / `env.ASPNETCORE_URLS` / `env.ASPNETCORE_HTTP_PORTS` / `applicationUrl` |
+| 4 | Framework-specific config files | See table below |
+| 5 | stdout parsing (built-in patterns) | Parse debug output events using framework-specific patterns (see table below) |
+| 6 | Port scan | Fallback when all above fail |
+| 7 | User confirmation UI | When scan is ambiguous, or scan base is unknown |
+
+#### User-specified Detection (Priority 2)
+
+If either `easyauth.launchJsonPortKey` or `easyauth.stdoutPortPattern` is set, only these are tried. **If this priority fails to resolve a port, priorities 3–7 are not evaluated at all, and the state transitions to `custom_detection_failed`** (see §4, §10). Once the user has explicitly named where the port comes from, a miss there is treated as a misconfiguration or a not-yet-started app — not something to keep guessing around with unrelated methods.
+
+| Setting | Behavior |
+| --- | --- |
+| `easyauth.launchJsonPortKey` | For the matching configuration in `launch.json`, the given key name is probed in order: ① an `env` entry → ② a top-level field of the configuration (a URL string, like `applicationUrl`) → ③ a flag name in the `args` array. Resolved synchronously. |
+| `easyauth.stdoutPortPattern` | Tries the given regular expression (one capture group) against debug output. Waits up to `easyauth.stdoutPatternTimeoutMs` (default 3000ms). |
+
+If both are set, `launchJsonPortKey` is checked first; if it finds nothing, detection falls through to waiting on `stdoutPortPattern`.
+
+Recovery from `custom_detection_failed` is manual port entry via the status bar only (no fallback to priorities 3–7).
 
 #### Selection Rule for Multiple URLs / Ports
 
@@ -215,7 +230,7 @@ When multiple URLs are listed (e.g., `ASPNETCORE_URLS`), one is selected using t
 
 Example: `https://localhost:7000;http://localhost:5000` → `5000` is used
 
-#### Framework-specific Config Files (Priority 3)
+#### Framework-specific Config Files (Priority 4)
 
 | Framework | File | Key |
 | --- | --- | --- |
@@ -225,9 +240,9 @@ Example: `https://localhost:7000;http://localhost:5000` → `5000` is used
 | Streamlit | `.streamlit/config.toml` | `[server] port` |
 | Node.js / Python | `.env` | `PORT` |
 
-#### stdout Parsing Patterns (Priority 4)
+#### stdout Parsing Patterns (Priority 5)
 
-Used when the debug adapter exposes OutputEvents. Skipped if not available.
+Used when the debug adapter exposes OutputEvents. Skipped if not available. The wait time is `easyauth.stdoutPatternTimeoutMs` (default 3000ms — shared with the priority-2 custom pattern).
 
 | Framework | Detection Pattern (regex) |
 | --- | --- |
@@ -238,14 +253,14 @@ Used when the debug adapter exposes OutputEvents. Skipped if not available.
 | FastAPI / Uvicorn | `Uvicorn running on https?://[^:]+:(\d+)` |
 | Streamlit | `Local URL:\s*https?://[^:]+:(\d+)` |
 
-#### Port Scan Specification (Priority 5)
+#### Port Scan Specification (Priority 6)
 
-- **Scan base:** `easyauth.portScanBase` (when `null`, scanning is skipped and priority 6 is tried immediately)
+- **Scan base:** `easyauth.portScanBase` (when `null`, scanning is skipped and priority 7 is tried immediately)
 - **Scan range:** `easyauth.portScanMax` ports (default: 5) starting from the base
 - **Method:** Attempt TCP connections to consecutive ports starting from the base; ports that respond are treated as candidates
-- **False-positive mitigation:** Limiting the scan range to 5 ports reduces false positives. When multiple candidates remain, the user confirmation UI (priority 6) resolves the ambiguity.
+- **False-positive mitigation:** Limiting the scan range to 5 ports reduces false positives. When multiple candidates remain, the user confirmation UI (priority 7) resolves the ambiguity.
 
-#### User Confirmation UI (Priority 6)
+#### User Confirmation UI (Priority 7)
 
 | Situation | UI |
 | --- | --- |
@@ -264,6 +279,9 @@ Used when the debug adapter exposes OutputEvents. Skipped if not available.
 | `easyauth.autoStart` | boolean | `true` | Auto-start when a debug session begins |
 | `easyauth.autoStop` | boolean | `true` | Auto-stop when the debug session ends |
 | `easyauth.upstreamPort` | number \| null | `null` | Manual port override (null = auto-detect) |
+| `easyauth.launchJsonPortKey` | string | `""` | Key name to find the port in `launch.json` (checked as `env`, then a top-level field, then an `args` flag; priority 2, see §6) |
+| `easyauth.stdoutPortPattern` | string | `""` | Custom regex for stdout port detection (priority 2, see §6) |
+| `easyauth.stdoutPatternTimeoutMs` | number | `3000` | Wait time for stdout port detection (shared by built-in and custom patterns) |
 | `easyauth.portScanMax` | number | `5` | Maximum number of ports to scan |
 | `easyauth.portScanBase` | number \| null | `null` | Scan base port (when no hint is available) |
 | `easyauth.verbose` | boolean | `false` | Print all resolved config values on startup (secrets masked) |
@@ -340,6 +358,7 @@ easyauth-emulator --app-upstream http://localhost:8081
 | `unconfigured` | `$(warning) EasyAuth: no config` | Open extension settings |
 | `missing_secret` | `$(lock) EasyAuth: secret missing` (yellow background) | Prompt to enter client secret |
 | `missing_entra_issuer` | `$(warning) EasyAuth: Entra issuer missing` (yellow background) | Open `easyauth.entra.oidcIssuerUrl` in workspace settings |
+| `custom_detection_failed` | `$(warning) EasyAuth: port unknown` (yellow background) | Enter the port via `showInputBox` → returns to `running` on successful start |
 | `starting` | `$(sync~spin) EasyAuth: starting...` | Open Output Channel |
 | `running` | `$(shield) EasyAuth: 8080:8081` (listen port : upstream port) | Open emulator in browser |
 | `error` | `$(error) EasyAuth: error` | 1st click: open Output Channel / subsequent clicks: detect port and restart |

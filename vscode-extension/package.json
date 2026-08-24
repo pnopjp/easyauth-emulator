@@ -75,10 +75,28 @@
             "order": 3,
             "description": "Manually specify the upstream port. Set to null for auto-detection."
           },
+          "easyauth.launchJsonPortKey": {
+            "type": "string",
+            "default": "",
+            "order": 4,
+            "markdownDescription": "Custom key name to look up in `launch.json` for the upstream port (checked before all other auto-detection). Checked in order: an `env` entry, a top-level field of the matching configuration (e.g. `applicationUrl`-style), then a flag name in `args` (e.g. `--port`). If set and not found, auto-detection stops there instead of falling through to the built-in detection steps."
+          },
+          "easyauth.stdoutPortPattern": {
+            "type": "string",
+            "default": "",
+            "order": 5,
+            "markdownDescription": "Custom regular expression (with one capture group for the port number) to match against debug output, checked before all other auto-detection. If set and the pattern never matches within `easyauth.stdoutPatternTimeoutMs`, auto-detection stops there instead of falling through to the built-in detection steps."
+          },
+          "easyauth.stdoutPatternTimeoutMs": {
+            "type": "number",
+            "default": 3000,
+            "order": 6,
+            "description": "Milliseconds to wait for a port number in debug output — applies to both easyauth.stdoutPortPattern and the built-in framework patterns."
+          },
           "easyauth.portScanMax": {
             "type": "number",
             "default": 5,
-            "order": 4,
+            "order": 7,
             "description": "Maximum number of consecutive ports to scan when auto-detecting the upstream port."
           },
           "easyauth.portScanBase": {
@@ -87,19 +105,19 @@
               "null"
             ],
             "default": null,
-            "order": 5,
+            "order": 8,
             "description": "Base port for port scanning when no other hint is available."
           },
           "easyauth.verbose": {
             "type": "boolean",
             "default": false,
-            "order": 6,
+            "order": 9,
             "markdownDescription": "Print all resolved configuration values (secrets masked) on startup, and enable extra protocol-level diagnostic logging to stderr. Passes `--verbose` to the emulator process."
           },
           "easyauth.privateBrowser.command": {
             "type": "string",
             "default": "",
-            "order": 7,
+            "order": 10,
             "markdownDescription": "Command to launch a private/incognito browser window. The site URL is appended as the last argument.\n\n**Examples:**\n- `msedge --inprivate`\n- `chrome --incognito`\n- `firefox --private-window`\n\nLeave empty to hide the private browser button.\n\n**Not used in remote sessions** (Remote - SSH / Tunnels): a browser cannot be launched on your local PC from the remote host, so the buttons copy the URL to the clipboard instead."
           }
         }
