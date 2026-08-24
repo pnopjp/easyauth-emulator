@@ -310,6 +310,21 @@ export class EmulatorManager implements vscode.Disposable {
         });
     }
 
+    /** Port detection stopped early because a custom launchJsonPortKey/stdoutPortPattern setting found no match. */
+    notifyCustomDetectionFailed(detail: string): void {
+        this.setState('custom_detection_failed');
+        this.outputChannelError(`[extension] Custom port detection did not match (${detail}).`);
+        vscode.window.showWarningMessage(
+            `EasyAuth: custom port detection found no match (${detail}). Enter the upstream port manually, ` +
+            `or fix easyauth.launchJsonPortKey / easyauth.stdoutPortPattern.`,
+            'Enter Port'
+        ).then((sel) => {
+            if (sel === 'Enter Port') {
+                void vscode.commands.executeCommand('easyauth.statusBarClick');
+            }
+        });
+    }
+
     private resolveBinary(): string | null {
         // Bundled binary (packed into the VSIX under /bin/)
         const extDir = this.context.extensionPath;
