@@ -27,6 +27,7 @@
 | `APP_UPSTREAM` | | `http://localhost:8081` ※ | 認証済みリクエストの転送先 URL。自分のアプリを使う場合はそのアプリの URL を設定してください。`https://` も指定可能——証明書検証については `SSL_CA_BUNDLE` を参照。 |
 | `DEBUG_HEADERS_ENDPOINT_ENABLED` | | `false` | `GET /.debug/headers` 診断エンドポイントを有効化するか。有効時はその URL でエミュレーターが受け取り計算したヘッダーを確認できる。既定では無効（`404` を返す）。 |
 | `SKIP_AUTH_ROUTES` | | — | 認証をスキップしてアップストリームへ直接転送するルート。形式: リクエストパスにマッチする `[METHOD=]REGEX` パターンをカンマ区切りで列挙。例: `GET=^/health$,^/public/`。転送前に認証ヘッダーは除去される。 |
+| `CORS_ALLOWED_ORIGINS` | | —(無効) | 許可するCORSオリジンのカンマ区切りリスト、または任意のオリジンを許可する`*`。実機Azure App Service/Functionsの「CORS」プラットフォーム設定を模したもので、Easy Auth自身とは独立に、`/.auth/*`を含む全ルートに効く。設定時、一致するクロスオリジンのpreflight `OPTIONS`は認証を経由せず直接応答し、実際の全レスポンスに`Access-Control-Allow-Origin`が付与される。既定は無効(挙動変化なし)。 |
 | `IDP_SELECT_ICONS` | | `simple` | `/.auth/login/select` 画面のアイコンスタイル。`simple` — Simple Icons CDN のロゴ。`generic` — 汎用 ID カードアイコン（完全オフライン対応）。`text` — アイコンなし、テキストのみ。 |
 | `VERBOSE` | | `false` | 起動時に全設定値を出力する（シークレットはマスク）ほか、プロトコルレベルの追加診断ログ（リクエストが実際にどのヘッダーで届いたか等）をstderrに出力する。`--verbose` / `-v` CLI フラグと同等。 |
 

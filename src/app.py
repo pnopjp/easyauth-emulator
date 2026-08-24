@@ -321,6 +321,32 @@ def _parse_skip_routes(raw: str) -> "list[tuple[str, re.Pattern]]":
 SKIP_AUTH_ROUTES = _parse_skip_routes(_cfg("SKIP_AUTH_ROUTES") or "")
 
 
+def _parse_cors_origins(raw: str) -> "list[str] | None":
+    """None = feature off (default). ["*"] = allow any origin. Otherwise an
+    explicit comma-separated origin allow-list — mirrors real Azure App
+    Service/Functions' own "CORS" platform setting (confirmed against real
+    Azure to apply to every route including /.auth/*, independent of Easy Auth
+    itself — see tools/azure-poc/azure-crossorigin-zumo-poc)."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    if raw == "*":
+        return ["*"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def _cors_allowed_origin(origin: str, allowed: "list[str] | None") -> "str | None":
+    """The exact Access-Control-Allow-Origin value to send, or None to omit it."""
+    if not origin or not allowed:
+        return None
+    if allowed == ["*"]:
+        return "*"
+    return origin if origin in allowed else None
+
+
+CORS_ALLOWED_ORIGINS = _parse_cors_origins(_cfg("CORS_ALLOWED_ORIGINS", ""))
+
+
 def _idp_cfg_prefix(idp: str) -> str:
     return f"IDP_{idp.upper().replace('-', '_')}"
 
@@ -673,7 +699,39 @@ class _RoutingMixin:
 
     # --- Routing ---
 
+    def _cors_response_headers(self) -> "list[tuple[str, str]]":
+        """Access-Control-Allow-Origin (+ Vary) to add to a response, or []
+        if CORS is off or this request's Origin isn't allowed. Recomputed
+        fresh on every call rather than cached on self — an HTTP/1.1 _Handler
+        instance persists across a keep-alive connection's multiple requests,
+        so a cached value could leak into a later request with a different
+        (or no) Origin."""
+        allowed = _cors_allowed_origin(self._header("Origin"), CORS_ALLOWED_ORIGINS)
+        if not allowed:
+            return []
+        return [("Access-Control-Allow-Origin", allowed), ("Vary", "Origin")]
+
     def _dispatch(self) -> None:
+        if self.command == "OPTIONS":
+            origin = self._header("Origin")
+            request_method = self._header("Access-Control-Request-Method")
+            if origin and request_method and _cors_allowed_origin(origin, CORS_ALLOWED_ORIGINS):
+                # A real CORS preflight — answered directly, the same way real
+                # Azure's own CORS platform feature intercepts it before Easy
+                # Auth or app routing ever see it (confirmed against real
+                # Azure — see tools/azure-poc/azure-crossorigin-zumo-poc).
+                # Access-Control-Allow-Origin/Vary aren't set here — every
+                # _send_*/_stream_* implementation already adds them via
+                # _cors_response_headers() (end_headers() override for
+                # _Handler, inline injection for _Http2StreamHandler); adding
+                # them here too would duplicate the header (invalid, browsers
+                # reject "Access-Control-Allow-Origin: *, *").
+                self._send_empty(200, {
+                    "Access-Control-Allow-Methods": request_method,
+                    "Access-Control-Allow-Headers": self._header("Access-Control-Request-Headers") or "*",
+                })
+                return
+
         path = urlsplit(self.path).path
 
         if path == "/healthz":
@@ -1338,6 +1396,16 @@ class _Handler(BaseHTTPRequestHandler, _RoutingMixin):
     def log_message(self, *_) -> None:
         return
 
+    def end_headers(self) -> None:
+        # Single choke point for every HTTP/1.1 response (ordinary responses,
+        # proxied protected routes, SSE all go through BaseHTTPRequestHandler's
+        # send_header/end_headers) — except _proxy_websocket's handshake, which
+        # writes raw bytes straight to self.wfile and never calls this; that's
+        # fine, WebSocket doesn't use fetch-CORS semantics anyway.
+        for name, value in self._cors_response_headers():
+            self.send_header(name, value)
+        super().end_headers()
+
     def do_GET(self)     -> None: self._dispatch()
     def do_POST(self)    -> None: self._dispatch()
     def do_PUT(self)     -> None: self._dispatch()
@@ -1681,15 +1749,18 @@ class _Http2StreamHandler(_RoutingMixin):
 
     def _send_response_with_trailers(self, status: int, headers: "list[tuple[str, str]]",
                                        body: bytes, trailers: "list[tuple[str, str]]") -> None:
+        headers = list(headers) + self._cors_response_headers()
         self._conn.send_stream_response(self._stream_id, status, headers, body, trailers=trailers or None)
 
     def _send_response(self, status: int, headers: "list[tuple[str, str]]", body: bytes) -> None:
+        headers = list(headers) + self._cors_response_headers()
         self._conn.send_stream_response(self._stream_id, status, headers, body)
 
     def _stream_response(self, status: int, headers: "list[tuple[str, str]]", chunks) -> None:
         # HTTP/2 frames data incrementally natively (no Content-Length or
         # chunked-encoding trick needed) — just send each chunk as its own
         # DATA frame and end the stream once the upstream response does.
+        headers = list(headers) + self._cors_response_headers()
         self._conn.send_stream_headers(self._stream_id, status, headers)
         try:
             for chunk in chunks:
@@ -1702,6 +1773,7 @@ class _Http2StreamHandler(_RoutingMixin):
 
     def _stream_response_with_trailers(self, status: int, headers: "list[tuple[str, str]]",
                                         chunks, get_trailers) -> None:
+        headers = list(headers) + self._cors_response_headers()
         self._conn.send_stream_headers(self._stream_id, status, headers)
         try:
             for chunk in chunks:

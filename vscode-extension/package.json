@@ -211,6 +211,13 @@
               "No icons, text only."
             ],
             "markdownDescription": "`IDP_SELECT_ICONS`: Icon style on the `/.auth/login/select` screen."
+          },
+          "easyauth.corsAllowedOrigins": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "order": 13,
+            "markdownDescription": "`CORS_ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins, or `*` for any origin. Mirrors Azure App Service/Functions' own \"CORS\" platform setting — applies to every route, including `/.auth/*`, independent of Easy Auth itself.\n\n**Example:** `https://example.com,https://app.example.com`"
           }
         }
       },

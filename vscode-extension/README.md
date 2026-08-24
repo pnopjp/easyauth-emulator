@@ -229,6 +229,7 @@ The extension always passes `--config .vscode/easyauth.toml` to the emulator on 
 | `easyauth.skipAuthRoutes` | `""` | Routes that bypass auth — comma-separated `[METHOD=]REGEX` patterns |
 | `easyauth.debugHeadersEndpointEnabled` | `false` | Enable `GET /.debug/headers` to inspect injected headers |
 | `easyauth.idpSelectIcons` | `simple` | Icons on the IdP selection screen: `simple`, `generic`, or `text` |
+| `easyauth.corsAllowedOrigins` | `""` | Allowed CORS origins — comma-separated list, or `*` for any origin |
 
 ### oauth2-proxy
 

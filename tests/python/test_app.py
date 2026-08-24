@@ -16,6 +16,7 @@ from src.app import (
     _build_provider_logout_url,
     _check_auth,
     _compute_client_principal,
+    _cors_allowed_origin,
     _decode_jwt_claims,
     _decode_principal,
     _extract_access_token,
@@ -25,6 +26,7 @@ from src.app import (
     _idp_user_id_claim,
     _load_config,
     _parse_bool_cfg,
+    _parse_cors_origins,
     _parse_skip_routes,
     _provider_logout_bridge_url,
     _safe_redirect,
@@ -527,3 +529,45 @@ class TestCheckAuthBearerTokenPrecedence:
         _check_auth("entra", cookie="session=abc", real_ip="", proto="", host="", uri="/")
         assert captured["headers"].get("Cookie") == "session=abc"
         assert "Authorization" not in captured["headers"]
+
+
+# ---------------------------------------------------------------------------
+# _parse_cors_origins / _cors_allowed_origin
+# ---------------------------------------------------------------------------
+
+class TestParseCorsOrigins:
+    def test_empty_string_means_off(self):
+        assert _parse_cors_origins("") is None
+
+    def test_whitespace_only_means_off(self):
+        assert _parse_cors_origins("   ") is None
+
+    def test_wildcard(self):
+        assert _parse_cors_origins("*") == ["*"]
+
+    def test_single_origin(self):
+        assert _parse_cors_origins("https://example.com") == ["https://example.com"]
+
+    def test_comma_separated_list_is_stripped(self):
+        assert _parse_cors_origins(" https://a.example.com , https://b.example.com ") == [
+            "https://a.example.com", "https://b.example.com",
+        ]
+
+
+class TestCorsAllowedOrigin:
+    def test_feature_off_returns_none(self):
+        assert _cors_allowed_origin("https://example.com", None) is None
+
+    def test_no_origin_header_returns_none(self):
+        assert _cors_allowed_origin("", ["https://example.com"]) is None
+
+    def test_wildcard_allows_any_origin(self):
+        assert _cors_allowed_origin("https://anything.example.com", ["*"]) == "*"
+
+    def test_matching_origin_is_echoed(self):
+        allowed = ["https://a.example.com", "https://b.example.com"]
+        assert _cors_allowed_origin("https://b.example.com", allowed) == "https://b.example.com"
+
+    def test_non_matching_origin_returns_none(self):
+        allowed = ["https://a.example.com"]
+        assert _cors_allowed_origin("https://evil.example.com", allowed) is None
