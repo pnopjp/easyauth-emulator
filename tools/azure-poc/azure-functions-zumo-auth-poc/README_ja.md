@@ -168,6 +168,59 @@ curl -s -i https://$funcAppName.azurewebsites.net/api/session -H "X-ZUMO-AUTH: g
 
 実施後は上記「状態」欄を実際の回答で更新し、`ToDo.md`に反映すること。
 
+## ローカルで動かす
+
+`function_app.py`は実機Azure Functionsへのデプロイなしに、Azure Functions Core Toolsで
+ローカル実行できる。ただし**ローカルのCore ToolsにはEasy Auth(認証)機能が一切無い**
+(実機Azureにデプロイした時だけ有効なプラットフォーム機能のため)。`/.auth/login/aad`は
+存在せず、`X-ZUMO-AUTH`/`Authorization`ヘッダーの検証も行われない。したがって、
+**このリポジトリ自身のEmulatorを「Functions役」のゲートウェイとして前段に置き、
+本物のEasy Auth形式のヘッダーを注入させて初めて意味のあるテストになる**
+(`../azure-crossorigin-zumo-poc`のC6・C7で実際に検証した構成と同じ考え方)。
+次の2つを両方起動する。
+
+### 1. function_app.pyをローカル起動する
+
+```powershell
+$pocDir = "tools\azure-poc\azure-functions-zumo-auth-poc"
+
+# デプロイ手順と同じくステージング(.gitignore対象)に集める
+New-Item -ItemType Directory -Force -Path "$pocDir\deploy-func" | Out-Null
+Copy-Item "$pocDir\function_app.py","$pocDir\host.json","$pocDir\requirements.txt" "$pocDir\deploy-func\"
+Copy-Item src\_sample_app_shared.py "$pocDir\deploy-func\"
+
+# local.settings.json(ローカル実行専用の設定。Easy Authは含まれない)
+@'
+{
+  "IsEncrypted": false,
+  "Values": { "AzureWebJobsStorage": "", "FUNCTIONS_WORKER_RUNTIME": "python" }
+}
+'@ | Out-File -Encoding utf8 "$pocDir\deploy-func\local.settings.json"
+
+cd "$pocDir\deploy-func"
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\Activate.ps1
+func start
+```
+
+`func start`を止める際は、`Ctrl+C`だけでなく、ポート(既定`7071`)がまだ使用中でないか
+(`netstat -ano`等で)確認すること。子プロセスが残って次回起動時に
+`Port 7071 is unavailable`になることがある。
+
+### 2. Emulatorを組み合わせる
+
+Emulator側の`config.toml`で`APP_UPSTREAM`をこのローカルFunctionsに向ける:
+
+```toml
+APP_UPSTREAM = "http://localhost:7071"
+```
+
+設定後にEmulatorを起動(または再起動)すれば、実際にAADに
+サインインして得た本物のEasy Auth形式のヘッダーが、このローカルの`function_app.py`に
+そのまま届く。あとは既存の手順(F1〜F3)と同様に、Emulator側のURLに対して
+`X-ZUMO-AUTH`/`Authorization: Bearer`でアクセスして確認する。
+
 ## 後片付け
 
 検証後はFunction App・ストレージアカウント(このPoC専用のリソースグループなら

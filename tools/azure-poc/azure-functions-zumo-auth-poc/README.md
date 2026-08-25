@@ -170,6 +170,61 @@ Check for `401`.
 Once run, fill in the **Status** section above with the actual answers and update
 `ToDo.md` accordingly.
 
+## Running locally
+
+`function_app.py` can be run locally with Azure Functions Core Tools, with no real
+Azure Functions deployment at all. But **the local Core Tools runtime has no Easy
+Auth (authentication) support whatsoever** — that's a platform feature only present
+once actually deployed to Azure. There's no `/.auth/login/aad` locally, and neither
+`X-ZUMO-AUTH` nor `Authorization` gets validated. So **this only becomes a
+meaningful test once this repo's own Emulator sits in front as the "Functions role"
+gateway, injecting real Easy-Auth-shaped headers** (the same idea actually
+exercised in `../azure-crossorigin-zumo-poc`'s C6/C7). Run both of these:
+
+### 1. Run function_app.py locally
+
+```powershell
+$pocDir = "tools\azure-poc\azure-functions-zumo-auth-poc"
+
+# Same staging step as the deploy instructions (.gitignore-excluded)
+New-Item -ItemType Directory -Force -Path "$pocDir\deploy-func" | Out-Null
+Copy-Item "$pocDir\function_app.py","$pocDir\host.json","$pocDir\requirements.txt" "$pocDir\deploy-func\"
+Copy-Item src\_sample_app_shared.py "$pocDir\deploy-func\"
+
+# local.settings.json (local-run-only config — no Easy Auth in it)
+@'
+{
+  "IsEncrypted": false,
+  "Values": { "AzureWebJobsStorage": "", "FUNCTIONS_WORKER_RUNTIME": "python" }
+}
+'@ | Out-File -Encoding utf8 "$pocDir\deploy-func\local.settings.json"
+
+cd "$pocDir\deploy-func"
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\Activate.ps1
+func start
+```
+
+When stopping `func start`, don't just rely on `Ctrl+C` — check the port (default
+`7071`) is actually free afterward (e.g. via `netstat -ano`). A leftover child
+process can keep holding it, causing the next `func start` to fail with
+`Port 7071 is unavailable`.
+
+### 2. Combine with the Emulator
+
+In the Emulator's own `config.toml`, point `APP_UPSTREAM` at this local Functions
+instance:
+
+```toml
+APP_UPSTREAM = "http://localhost:7071"
+```
+
+Start (or restart) the Emulator after that, and a real,
+actually-signed-in Easy-Auth-shaped header set reaches this local `function_app.py`
+directly. From there, test the same way as F1-F3 above — `X-ZUMO-AUTH` /
+`Authorization: Bearer` against the Emulator's own URL.
+
 ## Cleanup
 
 Delete the Function App and storage account (or the whole resource group, if it's

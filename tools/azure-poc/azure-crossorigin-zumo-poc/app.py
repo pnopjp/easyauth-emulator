@@ -7,13 +7,15 @@ same-origin /.auth/me, cookie sent automatically — the App Service session coo
 itself never crosses origins, so it can't be used directly against Functions):
 
   - "Run (X-ZUMO-AUTH)": the client-directed sign-in flow — POST the access_token
-    to the Functions app's /.auth/login/aad to get back its own authenticationToken,
-    then call /api/session with X-ZUMO-AUTH: <authenticationToken>.
+    to the Functions app's /.auth/login/<provider_name> (the provider identifier
+    from /.auth/me, e.g. "aad" — not necessarily AAD) to get back its own
+    authenticationToken, then call /api/session with
+    X-ZUMO-AUTH: <authenticationToken>.
   - "Run (Authorization: Bearer)": presents the access_token directly to
     /api/session via a plain Authorization: Bearer header, skipping the
-    /.auth/login/aad round trip entirely — the "daemon client application"
-    (service-to-service) pattern from Microsoft's own docs, distinct from
-    client-directed sign-in.
+    /.auth/login/<provider_name> round trip entirely — the "daemon client
+    application" (service-to-service) pattern from Microsoft's own docs, distinct
+    from client-directed sign-in.
 
 Deploy this behind the SAME App Service already used in ../azure-zumo-auth-poc
 (Easy Auth/Entra ID already configured there) — see README.md.
@@ -67,8 +69,9 @@ function decodeJwtClaims(jwt) {
   }
 }
 
-// Shared by both buttons: read this App Service's own stored access_token via
-// same-origin /.auth/me. Returns null (after logging why) if unavailable.
+// Shared by both buttons: read this App Service's own stored access_token (and
+// which provider it came from) via same-origin /.auth/me. Returns null (after
+// logging why) if unavailable.
 async function getAccessToken() {
   log('1. GET /.auth/me (same-origin, cookie sent automatically)...');
   const meResp = await fetch('/.auth/me', { credentials: 'same-origin' });
@@ -78,7 +81,9 @@ async function getAccessToken() {
     return null;
   }
   const accessToken = me[0].access_token;
-  log('Got access_token from the token store (length ' + accessToken.length + ').');
+  const idToken = me[0].id_token;
+  const providerName = me[0].provider_name;
+  log('Got access_token from the token store (provider: ' + providerName + ', length ' + accessToken.length + ').');
   const claims = decodeJwtClaims(accessToken);
   if (claims) {
     log('access_token claims (subset only): ' + JSON.stringify({
@@ -88,7 +93,7 @@ async function getAccessToken() {
       iat: claims.iat, exp: claims.exp,
     }));
   }
-  return accessToken;
+  return { accessToken, idToken, providerName };
 }
 
 function getFuncBase() {
@@ -103,14 +108,22 @@ document.getElementById('runZumo').addEventListener('click', async () => {
   if (!funcBase) return;
 
   try {
-    const accessToken = await getAccessToken();
-    if (!accessToken) return;
+    const token = await getAccessToken();
+    if (!token) return;
+    const { accessToken, idToken, providerName } = token;
 
-    log('2. POST ' + funcBase + '/.auth/login/aad (cross-origin, client-directed sign-in)...');
-    const loginResp = await fetch(funcBase + '/.auth/login/aad', {
+    // Which field the login endpoint actually requires differs by provider
+    // (e.g. AAD wants access_token, Google wants id_token) — send whichever
+    // of the two the token store gave us and let Easy Auth pick what it needs.
+    const loginBody = {};
+    if (accessToken) loginBody.access_token = accessToken;
+    if (idToken) loginBody.id_token = idToken;
+
+    log('2. POST ' + funcBase + '/.auth/login/' + providerName + ' (cross-origin, client-directed sign-in)...');
+    const loginResp = await fetch(funcBase + '/.auth/login/' + providerName, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_token: accessToken }),
+      body: JSON.stringify(loginBody),
     });
     log('HTTP ' + loginResp.status);
     if (!loginResp.ok) { log('Client-directed login failed.'); return; }
@@ -136,12 +149,14 @@ document.getElementById('runBearer').addEventListener('click', async () => {
   if (!funcBase) return;
 
   try {
-    const accessToken = await getAccessToken();
-    if (!accessToken) return;
+    const token = await getAccessToken();
+    if (!token) return;
+    const { accessToken } = token;
 
-    // No /.auth/login/aad round trip — present the access_token straight to the
-    // protected route via the standard OAuth 2.0 Authorization header, per the
-    // "daemon client application" (service-to-service) pattern in Microsoft's docs.
+    // No /.auth/login/<provider_name> round trip — present the access_token
+    // straight to the protected route via the standard OAuth 2.0 Authorization
+    // header, per the "daemon client application" (service-to-service) pattern
+    // in Microsoft's docs.
     log('2. GET ' + funcBase + '/api/session with Authorization: Bearer...');
     const apiResp = await fetch(funcBase + '/api/session', {
       headers: { 'Authorization': 'Bearer ' + accessToken },
